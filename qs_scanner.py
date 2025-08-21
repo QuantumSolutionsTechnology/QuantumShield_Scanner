@@ -81,20 +81,20 @@ ENABLE_SSLYZE_ENUM     = os.getenv("QS_ENABLE_SSLYZE", "true").lower() != "false
 ENABLE_PQC_HYBRID_SCAN = os.getenv("QS_ENABLE_PQC", "true").lower() != "false"
 
 # SSH Auth (for FS scan)
-SSH_AUTH = {
+SSH_AUTH = globals().get("SSH_AUTH") or {
     "enabled": os.getenv("QS_FS_ENABLED", "true").lower() != "false",
-    "hostname": QS_SSH_HOST,
-    "port": QS_SSH_PORT,
-    "username": QS_SSH_USER,
-    "password": QS_SSH_PASSWORD,
-    "pkey": None,             # keep None; prefer key file path below
-    "key_filename": QS_SSH_KEYFILE,
-    "paths_to_scan": [QS_SCAN_PATH],
+    "hostname": os.getenv("QS_SSH_HOST", "localhost"),
+    "port": int(os.getenv("QS_SSH_PORT", "22")),
+    "username": os.getenv("QS_SSH_USER", "qsro"),
+    "password": os.getenv("QS_SSH_PASSWORD"),
+    "pkey": None,
+    "key_filename": os.getenv("QS_SSH_KEYFILE") or None,
+    "paths_to_scan": [os.getenv("QS_SCAN_PATH", "/opt")],
 }
 
-# Targets: prefer targets.json; else start with inline, then optionally extend with Azure discovery
-TARGETS = load_targets_json() or [
-    {"host": "--------", "name": "--------", "ports": {"tls": 443, "ssh": 22, "rdp": 3389}},
+# Prefer injected globals (from run_scan.py), else fall back to local/defaults
+TARGETS = globals().get("TARGETS") or load_targets_json() or [
+    {"host": "example.com", "name": "example", "ports": {"tls": 443, "ssh": 22, "rdp": 3389}},
 ]
 
 # Extend with Azure discovered IPs (deduplicated) using default ports
@@ -248,7 +248,7 @@ def ike_scan(host, timeout=25, groups=(14, 15, 16, 19, 20, 21)):
     """Probe IKEv2, try several DH groups, parse SA line on success."""
     tried = []
     for g in groups:
-        cmd = f"ike-scan --ikev2 -M --timeout={timeout} --dhgroup={g} {host}"
+        cmd = f"ike-scan --ikev2 -M --timeout={timeout} --dhgroup={g} -- {host}"
         res = sh(cmd, check=False)
         txt = (res.stdout or "") + (res.stderr or "")
         tried.append({"group": g, "snippet": (txt.strip()[:400] or "")})
@@ -1164,4 +1164,3 @@ df = pd.DataFrame(rows)
 df.to_csv("cbom.csv", index=False)
 print("Wrote cbom.json and cbom.csv")
 df
-
