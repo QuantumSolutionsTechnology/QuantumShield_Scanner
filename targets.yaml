@@ -1,0 +1,19 @@
+
+targets:
+  - host: example.com
+    name: web-prod
+    ports:
+      tls: 443
+      ssh: 22
+      rdp: 3389
+
+ssh_auth:
+  enabled: false
+  hostname: example.com
+  port: 22
+  username: ubuntu
+  password: null
+  pkey: null
+  key_filename: null
+  paths_to_scan:
+    - /opt/your_app
