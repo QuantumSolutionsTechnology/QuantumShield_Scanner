@@ -1,0 +1,16 @@
+# ============================
+# QuantumShield Scanner .env
+# ============================
+
+# --- Azure Authentication ---
+AZURE_TENANT_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+AZURE_CLIENT_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+AZURE_CLIENT_SECRET=your-azure-client-secret
+AZURE_SUBSCRIPTION_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+
+# --- Optional SSH FS Scan ---
+QS_SSH_HOST=203.0.113.10
+QS_SSH_PORT=22
+QS_SSH_USER=qsro
+QS_SSH_KEYFILE=/home/you/.ssh/id_ed25519
+QS_SCAN_PATH=/opt/quantumshield_demo
