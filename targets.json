@@ -1,0 +1,12 @@
+[
+  {
+    "host": "203.0.113.10",
+    "name": "azure-vm-01",
+    "ports": { "tls": 443, "ssh": 22, "rdp": 3389 }
+  },
+  {
+    "host": "example.com",
+    "name": "prod-web",
+    "ports": { "tls": 443 }
+  }
+]
