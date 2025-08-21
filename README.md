@@ -1,9 +1,9 @@
 # QuantumShield Cryptography Scanner — README
 
-This guide shows **exactly** how to configure and test the scanner using simple
+This guide shows how to configure and test the scanner using simple
 **environment variables** (for Azure auth and feature toggles) and **target files**
 (for hosts and optional SSH file-system scan settings). You can still hardcode config
-in `qs_scanner.py`, but file-based config makes testing and re-runs much easier.
+in `qs_scanner.py`, but file-based config makes testing and re-runs easier.
 
 ---
 
