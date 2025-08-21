@@ -6,8 +6,6 @@
 **Optional FS scan:** SFTP-only sweep (no remote shell) for certs/keys/keystores/configs and crypto signals  
 **Outputs:** `cbom.json` (structured) and `cbom.csv` (spreadsheet-friendly)
 
-> ⚠️ Run this against systems you own or have explicit permission to test.
-
 ---
 
 ## Repo layout (key files)
