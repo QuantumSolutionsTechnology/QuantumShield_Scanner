@@ -1,4 +1,4 @@
-# QuantumShield Cryptography Scanner — Quickstart & Usage
+# QuantumShield Cryptography Scanner — Quickstart, Re‑Run & Usage
 
 **What it does:** Scans endpoints you own/control to inventory network crypto posture and optional file-system artifacts.
 
@@ -12,8 +12,11 @@
 
 - `run_scan.py` – runner that loads config (`.env`, `targets.yaml`) and invokes the scanner
 - `qs_scanner.py` – the scanner module (TLS/SSH/RDP/IKE/FS logic)
-- `targets.yaml` – your target hosts and ports (you create/edit this)
-- `.env` – feature toggles & optional Azure credentials (you create/edit this)
+- `targets.yaml` – your target hosts and ports (**you create/edit this**)
+- `.env` – feature toggles & optional Azure credentials (**you create/edit this**)
+- `Dockerfile` – optional reusable container image (if you choose the Docker route)
+
+> **Tip:** Keep secrets in `.env`. Don’t commit `.env` to source control.
 
 ---
 
@@ -21,6 +24,8 @@
 
 - **A) Native Linux (recommended if you have Ubuntu/Debian/RHEL, etc.)**
 - **B) Docker (recommended for Windows & macOS; also works on Linux)**
+
+Both paths produce the same outputs in your repo folder.
 
 ---
 
@@ -39,7 +44,6 @@ sudo apt-get install -y python3 python3-venv python3-pip nmap ike-scan openssl
 sudo dnf install -y python3 python3-venv python3-pip nmap ike-scan openssl
 # or: sudo yum install -y ...
 ```
-
 > `ike-scan` may live in EPEL or a separate repo on some distros.
 
 ### 2) Create a virtual environment & install Python deps
@@ -86,8 +90,17 @@ Add more entries to scan additional hosts.
 ```bash
 python run_scan.py
 ```
+**Results:** `cbom.json` and `cbom.csv` appear in the repo folder.
 
-**Results:** `cbom.json` and `cbom.csv` appear in the repo folder. Open the CSV to review `status` and `risk_flags` per protocol.
+### Re‑run (Linux, after initial setup)
+- If you **only changed targets or `.env`**:  
+  ```bash
+  source .venv/bin/activate
+  python run_scan.py
+  ```
+- If you **changed Python deps**: re-run `pip install …` (step 2).  
+- If you **changed system tools** (nmap/ike-scan): update via your package manager.  
+- If you **changed scanner code**: just `python run_scan.py` again (no rebuild needed).
 
 ---
 
@@ -98,7 +111,7 @@ python run_scan.py
 
 You’ll run inside a clean Linux container so you don’t need to install tools on your host.
 
-### Option 1 — One-liner (ephemeral image)
+### Option 1 — One‑liner (ephemeral image)
 From **PowerShell** (Windows) or **Terminal** (macOS/Linux) in the repo root:
 ```bash
 docker run --rm -it \
@@ -127,10 +140,7 @@ docker run --rm -it `
   "
 ```
 
-**What this does**
-- Mounts your repo into `/app` (outputs land back in your host folder)
-- Installs `nmap`, `ike-scan`, `openssl` and required Python libs
-- Runs `run_scan.py` using your `.env` and `targets.yaml`
+**Re‑run (ephemeral):** just re‑run the same `docker run …` command. No rebuild necessary.
 
 > `sudo: not found` messages are harmless in containers—you're already root.
 
@@ -156,7 +166,41 @@ docker build -t qs-scan .
 docker run --rm -it -v "$PWD:/app" -w /app --env-file .env --cap-add=NET_RAW --cap-add=NET_ADMIN qs-scan
 ```
 
+**Re‑run (reusable image):**
+- If you **only changed `targets.yaml` or `.env`**: run the same `docker run …` again.  
+- If you **changed code** (`run_scan.py` / `qs_scanner.py`):  
+  *No rebuild required*—the repo is mounted at runtime. Just `docker run …` again.  
+- If you **changed the Dockerfile** or **Python dependency list**: rebuild the image:  
+  ```bash
+  docker build -t qs-scan .
+  ```
+
 > Some desktop NATs limit UDP/500 (IKE). TLS/SSH/RDP will still work.
+
+---
+
+## Quick “Run Again” Cheat‑Sheet
+
+- **Linux (venv):**
+  ```bash
+  source .venv/bin/activate
+  python run_scan.py
+  ```
+
+- **Docker one‑liner (macOS/Linux Terminal):**
+  ```bash
+  docker run --rm -it -v "$PWD:/app" -w /app --env-file .env --cap-add=NET_RAW --cap-add=NET_ADMIN python:3.12-bookworm bash -lc "apt-get update -y && apt-get install -y nmap ike-scan openssl && python -m pip install --no-cache-dir python-dotenv pyyaml cryptography paramiko pandas pynacl ecdsa sslyze pyjks pyelftools && python run_scan.py"
+  ```
+
+- **Docker one‑liner (Windows PowerShell):**
+  ```powershell
+  docker run --rm -it -v "$((Get-Location).Path):/app" -w /app --env-file .env --cap-add=NET_RAW --cap-add=NET_ADMIN python:3.12-bookworm bash -lc "apt-get update -y && apt-get install -y nmap ike-scan openssl && python -m pip install --no-cache-dir python-dotenv pyyaml cryptography paramiko pandas pynacl ecdsa sslyze pyjks pyelftools && python run_scan.py"
+  ```
+
+- **Docker reusable image (after `docker build -t qs-scan .`):**
+  ```bash
+  docker run --rm -it -v "$PWD:/app" -w /app --env-file .env --cap-add=NET_RAW --cap-add=NET_ADMIN qs-scan
+  ```
 
 ---
 
@@ -187,18 +231,10 @@ If this fails, the scanner can’t reach the target (firewall, DNS, routing).
 |---|---|
 | `Azure … invalid tenant` or similar | Azure is optional. Leave fields blank to skip cloud discovery; the scan still runs on your YAML targets. |
 | `TLS status: closed` | 443 blocked/unreachable from the **runner** (container/host). Test with `openssl s_client` as above. |
-| `ike-scan` shows no handshake | UDP/500 blocked by NAT/firewall (common on Desktop Docker). Try from a Linux host/VM with direct egress, or ignore IKE for now. |
+| `ike-scan` shows no handshake` | UDP/500 blocked by NAT/firewall (common on Desktop Docker). Try from a Linux host/VM with direct egress, or ignore IKE for now. |
 | `sudo: not found` at start | Harmless inside containers; tools are installed with `apt-get` as root. |
 | FS scan errors or empty | Ensure `ssh_auth.enabled: true` and valid SSH creds/paths in config if you enable FS scanning. |
 | `sslyze`/`nmap` not found on host | Install using your OS package manager (Linux) or use the Docker route. |
-
----
-
-## Security & hygiene
-
-- Keep secrets in `.env`. **Do not commit** `.env` to source control.
-- Limit scans to assets you own or have written permission to test.
-- Results include hints like `risk_flags` (`legacy_tls`, `rsa_lt_3072`, `ssh_sha1_macs_enabled`, etc.) to prioritize remediation.
 
 ---
 
