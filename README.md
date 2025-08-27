@@ -1,6 +1,6 @@
 # QuantumShield Cryptography Scanner — Quickstart & Usage
 
-Scans endpoints you own/control to inventory network crypto posture and (optionally) **file‑system artifacts over SFTP**.
+Scans endpoints to inventory network cryptographic posture and (optionally) **file‑system artifacts over SFTP**.
 
 **Protocols:** TLS, SSH, RDP, IKE (+ optional QUIC reachability)  
 **Optional FS scan:** SFTP-only sweep (no remote shell) for certs/keys/keystores/configs & crypto signals  
