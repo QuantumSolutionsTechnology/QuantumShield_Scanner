@@ -912,16 +912,6 @@ def assess_ike(find):
     return flags
 
 # ----------------------------
-# ssh audit
-# ----------------------------
-
-for t in TARGETS:
-    ssh_audit_json_results = qs_ssh_audit_tool.audit_ssh_host(t["host"])
-    if ssh_audit_json_results:
-        with open(f'ssh_audit_{t["host"]}.json', 'w') as f:
-            json.dump(ssh_audit_json_results, f, indent=2)
-
-# ----------------------------
 # Orchestration
 # ----------------------------
 evidence = []
@@ -967,6 +957,13 @@ for t in TARGETS:
         evidence.append(sshr)
     else:
         evidence.append({"protocol": "SSH", "host": host, "port": ssh_port, "status": "closed"})
+
+    # SSHD audit
+    if ENABLE_SSH_AUDIT_SCAN:
+        ssh_audit_json_results = qs_ssh_audit_tool.audit_ssh_host(t["host"])
+        if ssh_audit_json_results:
+            with open(f'ssh_audit_{t["host"]}.json', 'w') as f:
+                json.dump(ssh_audit_json_results, f, indent=2)
 
     # RDP (optional)
     if t["ports"].get("rdp") and is_port_open(host, t["ports"]["rdp"]):
