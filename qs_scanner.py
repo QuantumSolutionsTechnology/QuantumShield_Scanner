@@ -972,6 +972,9 @@ for t in TARGETS:
 
     # ---------------- Optional: FS/Binary scan (enhanced, SFTP-only) ----------------
 def ssh_connect(cfg):
+    import paramiko, os
+    if os.environ.get("QS_SSH_DEBUG") == "true":
+        paramiko.util.log_to_file("paramiko-debug.log")
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
@@ -1004,6 +1007,7 @@ def ssh_connect(cfg):
             username=cfg["username"],
             password=(None if pkey_obj else cfg.get("password")),  # only send password if no key
             pkey=pkey_obj,
+            key_filename=cfg.get("key_filename"),
             allow_agent=False,
             look_for_keys=False,
             timeout=10,
@@ -1118,6 +1122,38 @@ def to_component(find):
     else:
         comp["details"] = {k: v for k, v in find.items() if k not in comp.keys()}
     return comp
+
+
+# === FS / Binary scan (SFTP-only) ===
+try:
+    if SSH_AUTH.get("enabled"):
+        print("[fs] FS scan enabled; attempting SFTP to", SSH_AUTH.get("hostname"))
+        try:
+            ssh = ssh_connect(SSH_AUTH)
+            fs_depth = int(os.getenv("QS_FS_MAX_DEPTH", "4"))
+            fs_items = int(os.getenv("QS_FS_MAX_ITEMS", "4000"))
+            paths = SSH_AUTH.get("paths_to_scan") or [os.getenv("QS_SCAN_PATH", "/opt")]
+            fs_results = fs_deep_scan_v2(ssh, paths, max_depth=fs_depth, max_items=fs_items)
+            for r in fs_results:
+                evidence.append(r)
+        except Exception as e:
+            evidence.append({
+                "protocol": "FS",
+                "host": SSH_AUTH.get("hostname"),
+                "status": "error",
+                "type": "SYSTEM",
+                "error": str(e),
+            })
+        finally:
+            try:
+                ssh.close()
+            except Exception:
+                pass
+    else:
+        print("[fs] FS scan disabled via config")
+except NameError:
+    # If functions not defined for some reason, skip gracefully
+    evidence.append({"protocol":"FS","status":"error","type":"SYSTEM","error":"FS scanning functions unavailable"})
 
 quantum_summary = derive_quantum_risk(evidence)
 evidence.append({
