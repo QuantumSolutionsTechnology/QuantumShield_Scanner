@@ -1,4 +1,4 @@
-# QuantumShield Cryptography Scanner — Quickstart & Usage (with FS/SFTP)
+# QuantumShield Cryptography Scanner — Quickstart & Usage
 
 Scans endpoints you own/control to inventory network crypto posture and (optionally) **file‑system artifacts over SFTP**.
 
