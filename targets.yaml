@@ -8,12 +8,14 @@ targets:
       rdp: 3389
 
 ssh_auth:
-  enabled: false           # leave false unless you want the optional FS scan
-  hostname: example.com
+  enabled: true           # leave false unless you want the optional FS scan
+  hostname: 00.00.00.00   # edit to target host
   port: 22
-  username: ubuntu
+  username: qsro
   password: null           # or set a password
   pkey: null               # or paste a PEM private key here
-  key_filename: null       # or path to a private key file
+  key_filename: /tmp/qsro_pem       # or path to a private key file
   paths_to_scan:
-    - /opt/your_app
+    - /opt/quantumshield_demo
+    - /etc/ssl
+    - /etc/ssh

@@ -1,26 +1,29 @@
 # QuantumShield Cryptography Scanner — Quickstart & Usage
 
-**What it does:** Scans endpoints you own/control to inventory network crypto posture and optional file-system artifacts.
+Scans endpoints to inventory network cryptographic posture and (optionally) **file‑system artifacts over SFTP**.
 
-**Protocols:** TLS, SSH, RDP, IKE (plus optional QUIC reachability)  
-**Optional FS scan:** SFTP-only sweep (no remote shell) for certs/keys/keystores/configs and crypto signals  
+**Protocols:** TLS, SSH, RDP, IKE (+ optional QUIC reachability)  
+**Optional FS scan:** SFTP-only sweep (no remote shell) for certs/keys/keystores/configs & crypto signals  
 **Outputs:** `cbom.json` (structured) and `cbom.csv` (spreadsheet-friendly)
 
 ---
 
 ## Repo layout (key files)
 
-- `run_scan.py` – runner that loads config (`.env`, `targets.yaml`) and invokes the scanner
-- `qs_scanner.py` – the scanner module (TLS/SSH/RDP/IKE/FS logic)
-- `targets.yaml` – your target hosts and ports (you create/edit this)
-- `.env` – feature toggles & optional Azure credentials (you create/edit this)
+- `run_scan.py` — runner that loads config (`.env`, `targets.yaml`) and invokes the scanner
+- `qs_scanner.py` — the scanner module (TLS/SSH/RDP/IKE/FS logic)
+- `targets.yaml` — your target hosts and ports (**you create/edit this**)
+- `.env` — feature toggles & optional Azure credentials (**you create/edit this**)
+- `Dockerfile` — optional reusable image for Docker path
 
 ---
 
 ## Choose your path
 
-- **A) Native Linux (recommended if you have Ubuntu/Debian/RHEL, etc.)**
-- **B) Docker (recommended for Windows & macOS; also works on Linux)**
+**A) Native Linux** (recommended if you have Ubuntu/Debian/RHEL, etc.)  
+**B) Docker** (recommended for **Windows & macOS**; also works on Linux)
+
+> If you’re on Windows/macOS, use **Docker**. If you’re on Linux, you can use either native or Docker.
 
 ---
 
@@ -29,18 +32,19 @@
 ### 1) Install system prerequisites
 
 **Ubuntu/Debian:**
+
 ```bash
 sudo apt-get update -y
 sudo apt-get install -y python3 python3-venv python3-pip nmap ike-scan openssl
 ```
 
-**RHEL/CentOS/Fedora (sudo dnf or yum):**
+**RHEL/CentOS/Fedora:**
+
 ```bash
 sudo dnf install -y python3 python3-venv python3-pip nmap ike-scan openssl
 # or: sudo yum install -y ...
+# Note: ike-scan may be in EPEL on some distros
 ```
-
-> `ike-scan` may live in EPEL or a separate repo on some distros.
 
 ### 2) Create a virtual environment & install Python deps
 ```bash
@@ -50,145 +54,329 @@ python -m pip install --upgrade pip
 python -m pip install python-dotenv pyyaml cryptography paramiko pandas pynacl ecdsa sslyze pyjks pyelftools ssh-audit
 ```
 
-### 3) Create `.env` (feature toggles and optional Azure)
-Create a file named **`.env`** in the repo root:
-```ini
-# ========== Feature toggles ==========
+### 3) Create `.env` (feature toggles + optional Azure + FS/SFTP)
+
+Create a file named `.env` in the repo root. **Example** (edit values for your environment):
+
+```dotenv
+# ===== (Optional) Azure discovery; leave blank to skip =====
+AZURE_TENANT_ID=
+AZURE_CLIENT_ID=
+AZURE_CLIENT_SECRET=
+AZURE_SUBSCRIPTION_ID=
+
+# ===== Inputs =====
+TARGETS_FILE=targets.yaml
+
+# ===== Feature toggles =====
 ENABLE_NMAP_TLS_ENUM=true
 ENABLE_SSLYZE_ENUM=true
 ENABLE_PQC_HYBRID_SCAN=false
 ENABLE_QUIC_PROBE=false
 
-# Use YAML targets via the runner
-TARGETS_FILE=targets.yaml
-
-# ========== (Optional) Azure discovery ==========
-AZURE_TENANT_ID=
-AZURE_CLIENT_ID=
-AZURE_CLIENT_SECRET=
-AZURE_SUBSCRIPTION_ID=
+# ===== FS / SFTP scan =====
+QS_FS_ENABLED=true
+QS_SSH_ENABLED=true
+QS_SSH_HOST=20.55.32.72   # Host to SFTP into (for FS scan)
+QS_SSH_PORT=22
+QS_SSH_USER=qsro
+QS_SSH_KEYFILE=/home/you/.ssh/qsro_pem     # path to your **private** key on the scanner machine
+QS_SCAN_PATH=/opt/quantumshield_demo        # directory to crawl on the remote host
+QS_SSH_DEBUG=true                           # verbose logs (optional)
 ```
-*Leave Azure blank to skip cloud discovery. The scan still runs on your YAML targets.*
 
 ### 4) Create `targets.yaml`
+
 Minimal example (replace with your real host/IP):
+
 ```yaml
-- host: your.domain.com
-  name: web1
+- host: 20.55.32.72
+  name: azure-vm-01
   ports:
     tls: 443
     ssh: 22
     rdp: 3389
 ```
+
 Add more entries to scan additional hosts.
 
-### 5) Run the scan
+### 5) Prepare the **remote** host for FS/SFTP scan (one-time)
+
+On each target VM you want to FS-scan **(Ubuntu example)**:
+
+```bash
+# 5.1 Create the scanning user (if not present)
+sudo id qsro || sudo useradd -m -s /bin/bash qsro
+
+# 5.2 Add your public key to that user
+sudo -u qsro mkdir -p /home/qsro/.ssh
+sudo -u qsro chmod 700 /home/qsro/.ssh
+# Paste your public key (ssh-ed25519/ssh-rsa) below between quotes:
+sudo bash -c 'echo "ssh-ed25519 AAAA... your-comment" >> /home/qsro/.ssh/authorized_keys'
+sudo chmod 600 /home/qsro/.ssh/authorized_keys
+sudo chown -R qsro:qsro /home/qsro/.ssh
+
+# 5.3 Ensure OpenSSH SFTP subsystem is enabled
+sudo grep -n '^Subsystem' /etc/ssh/sshd_config
+# It should show either of these:
+#   Subsystem sftp /usr/lib/openssh/sftp-server
+# or
+#   Subsystem sftp internal-sftp
+# If you changed it, then:
+sudo systemctl restart ssh
+
+# 5.4 Ensure the directory you want to scan is world-readable (or at least readable to 'qsro')
+sudo test -r /opt/quantumshield_demo || sudo chmod -R a+rX /opt/quantumshield_demo
+```
+
+**Optional sanity test** from your scanner box:
+```bash
+# list remote path via sftp
+sftp -i /path/to/qsro_pem -P 22 qsro@20.55.32.72 <<'EOF'
+ls -l /opt/quantumshield_demo
+bye
+EOF
+```
+
+### 6) Run the scan
 ```bash
 python run_scan.py
 ```
+Results: `cbom.json` and `cbom.csv` appear in the repo folder.
 
-**Results:** `cbom.json` and `cbom.csv` appear in the repo folder. Open the CSV to review `status` and `risk_flags` per protocol.
+**Re-run later:** just re-run `python run_scan.py` (you can keep the same venv).
 
 ---
 
-## B) Docker route (Windows / macOS / Linux)
+## B) Windows/macOS (and Linux) via **Docker**
 
-### Prerequisite
+> This path runs the scanner inside a clean Linux container. No local installs needed besides Docker.
+
+### 0) Prerequisite
 - **Docker Desktop** (Windows/macOS) or **Docker Engine** (Linux). Use **Linux containers** mode on Desktop.
 
-You’ll run inside a clean Linux container so you don’t need to install tools on your host.
+### 1) Generate or choose your SSH keypair (on your laptop)
+If you don’t already have one for scanning:
+```powershell
+# PowerShell (Windows) — creates C:\Users\<you>\.ssh\qsro_pem(.pem) and public key .pub
+ssh-keygen -t ed25519 -f "$env:USERPROFILE\.ssh\qsro_pem" -C "qsro-scan"
+```
+Remember the two files (adjust names if you used different ones):
+- **Private**: `C:\Users\<you>\.ssh\qsro_pem.pem` (or no `.pem` on older OpenSSH)
+- **Public**:  `C:\Users\<you>\.ssh\qsro_pem.pub`
 
-### Option 1 — One-liner (ephemeral image)
-From **PowerShell** (Windows) or **Terminal** (macOS/Linux) in the repo root:
+### 2) Put the **public** key on the VM (Ubuntu example)
+Either paste the key directly (SSH’d in as an admin user) **or** copy it up with `scp`.
+
+**A. Paste method (on the VM):**
 ```bash
-docker run --rm -it \
-  -v "$PWD:/app" -w /app \
-  --env-file .env \
-  --cap-add=NET_RAW --cap-add=NET_ADMIN \
-  python:3.12-bookworm bash -lc "
-    apt-get update -y &&
-    apt-get install -y nmap ike-scan openssl &&
-    python -m pip install --no-cache-dir python-dotenv pyyaml cryptography paramiko pandas pynacl ecdsa sslyze pyjks pyelftools &&
-    python run_scan.py
-  "
+sudo id qsro || sudo useradd -m -s /bin/bash qsro
+sudo -u qsro mkdir -p /home/qsro/.ssh
+sudo -u qsro chmod 700 /home/qsro/.ssh
+# paste the single-line public key content into the echo below:
+sudo bash -c 'echo "ssh-ed25519 AAAA... qsro-scan" >> /home/qsro/.ssh/authorized_keys'
+sudo chmod 600 /home/qsro/.ssh/authorized_keys
+sudo chown -R qsro:qsro /home/qsro/.ssh
 ```
 
-**PowerShell alternative mount (if `$PWD` doesn’t expand):**
+**B. Copy method from Windows (PowerShell):**
+```powershell
+# Use your existing admin login/key for the VM to copy the public key up
+scp -i "C:\path\to\your\admin_login_key.pem" `
+    "C:\Users\<you>\.ssh\qsro_pem.pub" `
+    azureuser@20.55.32.72:/tmp/qsro_pub.pub
+
+# Then on the VM:
+sudo id qsro || sudo useradd -m -s /bin/bash qsro
+sudo -u qsro mkdir -p /home/qsro/.ssh
+sudo -u qsro chmod 700 /home/qsro/.ssh
+sudo bash -c 'cat /tmp/qsro_pub.pub >> /home/qsro/.ssh/authorized_keys'
+sudo chmod 600 /home/qsro/.ssh/authorized_keys
+sudo chown -R qsro:qsro /home/qsro/.ssh
+```
+
+**Ensure SFTP is enabled and the scan path is readable:**
+```bash
+# On the VM
+sudo grep -n '^Subsystem' /etc/ssh/sshd_config
+# Expect: "Subsystem sftp /usr/lib/openssh/sftp-server" OR "Subsystem sftp internal-sftp"
+sudo systemctl restart ssh
+
+sudo test -r /opt/quantumshield_demo || sudo chmod -R a+rX /opt/quantumshield_demo
+```
+
+### 3) Create `.env` and `targets.yaml` in your repo (on your laptop)
+
+**`.env` example (Windows/macOS via Docker):**
+```dotenv
+# Azure (optional — leave blank to skip)
+AZURE_TENANT_ID=
+AZURE_CLIENT_ID=
+AZURE_CLIENT_SECRET=
+AZURE_SUBSCRIPTION_ID=
+
+TARGETS_FILE=targets.yaml
+
+ENABLE_NMAP_TLS_ENUM=true
+ENABLE_SSLYZE_ENUM=true
+ENABLE_PQC_HYBRID_SCAN=false
+ENABLE_QUIC_PROBE=false
+
+# FS/SFTP
+QS_FS_ENABLED=true
+QS_SSH_ENABLED=true
+QS_SSH_HOST=20.55.32.72
+QS_SSH_PORT=22
+QS_SSH_USER=qsro
+
+# IMPORTANT: inside the container we will copy your key to /tmp/qsro_pem with chmod 600
+QS_SSH_KEYFILE=/tmp/qsro_pem
+
+# Directory on the VM to crawl:
+QS_SCAN_PATH=/opt/quantumshield_demo
+
+# Optional debug
+QS_SSH_DEBUG=true
+```
+
+**`targets.yaml` example:**
+```yaml
+- host: 20.55.32.72
+  name: azure-vm-01
+  ports:
+    tls: 443
+    ssh: 22
+    rdp: 3389
+```
+
+### 4) Run (ephemeral one-liner) — **PowerShell**
+
+> This mounts your repo and your private key, fixes key perms inside the container (required by SSH), then runs the scan.
+
 ```powershell
 docker run --rm -it `
   -v "$((Get-Location).Path):/app" -w /app `
+  -v "C:\Users\<you>\.ssh\qsro_pem.pem:/app/keys/qsro_pem.pem:ro" `
   --env-file .env `
+  --env QS_SSH_KEYFILE=/tmp/qsro_pem `
   --cap-add=NET_RAW --cap-add=NET_ADMIN `
   python:3.12-bookworm bash -lc "
     apt-get update -y &&
     apt-get install -y nmap ike-scan openssl &&
     python -m pip install --no-cache-dir python-dotenv pyyaml cryptography paramiko pandas pynacl ecdsa sslyze pyjks pyelftools &&
+    install -m 600 /app/keys/qsro_pem.pem /tmp/qsro_pem &&
+    echo '--- test ssh as qsro ---' &&
+    ssh -i /tmp/qsro_pem -o StrictHostKeyChecking=no ${QS_SSH_USER}@${QS_SSH_HOST} 'echo FS-OK' &&
     python run_scan.py
   "
 ```
 
-**What this does**
-- Mounts your repo into `/app` (outputs land back in your host folder)
-- Installs `nmap`, `ike-scan`, `openssl` and required Python libs
-- Runs `run_scan.py` using your `.env` and `targets.yaml`
-
-> `sudo: not found` messages are harmless in containers—you're already root.
-
-### Option 2 — Reusable image with a `Dockerfile`
-Create **`Dockerfile`** in the repo root:
-```dockerfile
-FROM python:3.12-bookworm
-RUN apt-get update -y && apt-get install -y --no-install-recommends \
-      nmap ike-scan openssl ca-certificates tzdata && \
-    rm -rf /var/lib/apt/lists/*
-RUN python -m pip install --upgrade pip && \
-    python -m pip install \
-      python-dotenv pyyaml \
-      cryptography paramiko pandas pynacl ecdsa sslyze pyjks pyelftools
-WORKDIR /app
-CMD ["python", "run_scan.py"]
-```
-Build & run:
+**macOS/Linux shell version:**
 ```bash
-docker build -t qs-scan .
-docker run --rm -it -v "$PWD:/app" -w /app --env-file .env --cap-add=NET_RAW --cap-add=NET_ADMIN qs-scan
+docker run --rm -it \
+  -v "$PWD:/app" -w /app \
+  -v "$HOME/.ssh/qsro_pem.pem:/app/keys/qsro_pem.pem:ro" \
+  --env-file .env \
+  --env QS_SSH_KEYFILE=/tmp/qsro_pem \
+  --cap-add=NET_RAW --cap-add=NET_ADMIN \
+  python:3.12-bookworm bash -lc "
+    apt-get update -y &&
+    apt-get install -y nmap ike-scan openssl &&
+    python -m pip install --no-cache-dir python-dotenv pyyaml cryptography paramiko pandas pynacl ecdsa sslyze pyjks pyelftools &&
+    install -m 600 /app/keys/qsro_pem.pem /tmp/qsro_pem &&
+    echo '--- test ssh as qsro ---' &&
+    ssh -i /tmp/qsro_pem -o StrictHostKeyChecking=no ${QS_SSH_USER}@${QS_SSH_HOST} 'echo FS-OK' &&
+    python run_scan.py
+  "
 ```
 
-> Some desktop NATs limit UDP/500 (IKE). TLS/SSH/RDP will still work.
+### 5) (Optional) Reusable image with Dockerfile
+
+Build once:
+```powershell
+docker build -t qs-scan .
+```
+
+Run:
+```powershell
+docker run --rm -it `
+  -v "$((Get-Location).Path):/app" -w /app `
+  -v "C:\Users\<you>\.ssh\qsro_pem.pem:/app/keys/qsro_pem.pem:ro" `
+  --env-file .env `
+  --env QS_SSH_KEYFILE=/tmp/qsro_pem `
+  --cap-add=NET_RAW --cap-add=NET_ADMIN `
+  qs-scan bash -lc "
+    install -m 600 /app/keys/qsro_pem.pem /tmp/qsro_pem &&
+    ssh -i /tmp/qsro_pem -o StrictHostKeyChecking=no ${QS_SSH_USER}@${QS_SSH_HOST} 'echo FS-OK' &&
+    python run_scan.py
+  "
+```
+
+### Re-running the scan (fast path)
+
+- **Docker one-liner:** just re-run the same `docker run …` command.
+- **Dockerfile path:** re-run the `docker run … qs-scan bash -lc "install … && python run_scan.py"` command.
+- **Native Linux:** re-run `python run_scan.py` from your venv.
+
+Outputs land in your repo (`cbom.json`, `cbom.csv`).
 
 ---
 
-## Outputs
+## Sanity checks
 
-- **`cbom.json`** — JSON CBOM with normalized evidence (protocol details, flags, artifacts)
-- **`cbom.csv`** — compact table: host, protocol, port, version/algorithm, `risk_flags`
-
-Open the CSV in Excel/Numbers to sort by risk or filter to a protocol.
-
----
-
-## Sanity check (TLS reachability)
-
-If TLS rows show `status=closed`, confirm 443 is reachable:
-
-**From Linux/macOS or inside the Docker shell:**
+**TLS reachability**
 ```bash
 openssl s_client -connect your.domain.com:443 -servername your.domain.com -brief </dev/null
 ```
-If this fails, the scanner can’t reach the target (firewall, DNS, routing).
+
+**SFTP reachability**
+```bash
+sftp -i /path/to/private_key -P 22 qsro@20.55.32.72 <<'EOF'
+ls -l /opt/quantumshield_demo
+bye
+EOF
+```
 
 ---
 
 ## Troubleshooting
 
-| Symptom | Likely cause / fix |
-|---|---|
-| `Azure … invalid tenant` or similar | Azure is optional. Leave fields blank to skip cloud discovery; the scan still runs on your YAML targets. |
-| `TLS status: closed` | 443 blocked/unreachable from the **runner** (container/host). Test with `openssl s_client` as above. |
-| `ike-scan` shows no handshake | UDP/500 blocked by NAT/firewall (common on Desktop Docker). Try from a Linux host/VM with direct egress, or ignore IKE for now. |
-| `sudo: not found` at start | Harmless inside containers; tools are installed with `apt-get` as root. |
-| FS scan errors or empty | Ensure `ssh_auth.enabled: true` and valid SSH creds/paths in config if you enable FS scanning. |
-| `sslyze`/`nmap` not found on host | Install using your OS package manager (Linux) or use the Docker route. |
+**“EOF during negotiation” on FS scan**  
+- Ensure SFTP subsystem is enabled:
+  ```bash
+  sudo grep -n '^Subsystem' /etc/ssh/sshd_config
+  # Expect:
+  #   Subsystem sftp /usr/lib/openssh/sftp-server
+  #   or: Subsystem sftp internal-sftp
+  sudo systemctl restart ssh
+  ```
+- Ensure your scan path is readable:
+  ```bash
+  sudo test -r /opt/quantumshield_demo || sudo chmod -R a+rX /opt/quantumshield_demo
+  ```
+- Confirm the key really works:
+  ```bash
+  ssh -i /path/to/private_key -o StrictHostKeyChecking=no qsro@20.55.32.72 "echo ok"
+  sftp -i /path/to/private_key -P 22 qsro@20.55.32.72 <<'EOF'
+  ls -l /opt/quantumshield_demo
+  bye
+  EOF
+  ```
+
+**“Permissions … too open” for your key inside Docker**  
+Always copy the key to a private path with mode `600` before use:
+```bash
+install -m 600 /app/keys/qsro_pem.pem /tmp/qsro_pem
+```
+
+**TLS status: closed**  
+Port 443 blocked/unreachable from the scanner (container/host). Test with `openssl s_client` above.
+
+**`ike-scan` no handshake**  
+UDP/500 often blocked by NAT/firewalls (esp. Desktop Docker). TLS/SSH/RDP still work.
+
+**Azure credential errors**  
+Azure is optional. Leave the fields blank to skip cloud discovery; scan runs on your YAML targets.
 
 ---
 
@@ -196,21 +384,21 @@ If this fails, the scanner can’t reach the target (firewall, DNS, routing).
 
 - Keep secrets in `.env`. **Do not commit** `.env` to source control.
 - Limit scans to assets you own or have written permission to test.
-- Results include hints like `risk_flags` (`legacy_tls`, `rsa_lt_3072`, `ssh_sha1_macs_enabled`, etc.) to prioritize remediation.
+- Results include `risk_flags` (e.g., `legacy_tls`, `rsa_lt_3072`, `ssh_sha1_macs_enabled`, etc.) to help prioritize remediation.
 
 ---
 
 ## FAQ
 
 **Do I need both YAML and JSON targets?**  
-No. Use **`targets.yaml`** with `run_scan.py`. The scanner prefers targets injected by the runner; legacy `targets.json` support exists only for backward compatibility.
+No. Use `targets.yaml` with `run_scan.py`. JSON support is legacy/back-compat.
 
 **Can I run natively on macOS?**  
-Yes, but Docker is usually simpler. If you prefer native: install Homebrew, then `brew install nmap ike-scan openssl@3`, ensure `python3` and `pip` are present, create a venv, and follow the Linux steps.
+Yes, with Homebrew (`brew install nmap ike-scan openssl@3`) and Python3 + venv, but **Docker is easier**.
 
 **Windows without Docker?**  
-WSL2 Ubuntu works, but Docker Desktop (Linux containers) is usually easier and avoids toolchain drift.
+WSL2 Ubuntu works, but Docker Desktop (Linux containers) is simpler and avoids toolchain drift.
 
 ---
 
-Happy scanning! ✨
+**Happy scanning! ✨**
