@@ -12,10 +12,13 @@ RUN python -m pip install --upgrade pip && \
     python -m pip install \
       cryptography paramiko pandas pynacl ecdsa sslyze pyjks pyelftools \
       python-dotenv pyyaml \
-      azure-identity azure-mgmt-compute azure-mgmt-network
+      azure-identity azure-mgmt-compute azure-mgmt-network \
+      ssh-audit
 
 # App workspace
 WORKDIR /app
+
+COPY . .
 
 # Default command can be overridden at runtime
 CMD ["python", "run_scan.py"]

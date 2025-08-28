@@ -51,7 +51,7 @@ sudo dnf install -y python3 python3-venv python3-pip nmap ike-scan openssl
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
-python -m pip install python-dotenv pyyaml cryptography paramiko pandas pynacl ecdsa sslyze pyjks pyelftools
+python -m pip install python-dotenv pyyaml cryptography paramiko pandas pynacl ecdsa sslyze pyjks pyelftools ssh-audit
 ```
 
 ### 3) Create `.env` (feature toggles + optional Azure + FS/SFTP)

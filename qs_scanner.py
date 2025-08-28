@@ -4,6 +4,9 @@
 import os, json, pathlib
 from typing import List, Dict
 
+import qs_utils
+import qs_ssh_audit_tool
+
 # Optional: load .env if present
 try:
     from dotenv import load_dotenv  # pip install python-dotenv
@@ -79,6 +82,7 @@ ENABLE_QUIC_PROBE      = os.getenv("QS_ENABLE_QUIC", "false").lower() == "true"
 ENABLE_NMAP_TLS_ENUM   = os.getenv("QS_ENABLE_NMAP", "true").lower() != "false"
 ENABLE_SSLYZE_ENUM     = os.getenv("QS_ENABLE_SSLYZE", "true").lower() != "false"
 ENABLE_PQC_HYBRID_SCAN = os.getenv("QS_ENABLE_PQC", "true").lower() != "false"
+ENABLE_SSH_AUDIT_SCAN = os.getenv("QS_ENABLE_SSH_AUDIT", "true").lower() != "false"
 
 # SSH Auth (for FS scan)
 SSH_AUTH = globals().get("SSH_AUTH") or {
@@ -953,6 +957,13 @@ for t in TARGETS:
         evidence.append(sshr)
     else:
         evidence.append({"protocol": "SSH", "host": host, "port": ssh_port, "status": "closed"})
+
+    # SSHD audit
+    if ENABLE_SSH_AUDIT_SCAN:
+        ssh_audit_json_results = qs_ssh_audit_tool.audit_ssh_host(t["host"])
+        if ssh_audit_json_results:
+            with open(f'ssh_audit_{t["host"]}.json', 'w') as f:
+                json.dump(ssh_audit_json_results, f, indent=2)
 
     # RDP (optional)
     if t["ports"].get("rdp") and is_port_open(host, t["ports"]["rdp"]):
