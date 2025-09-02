@@ -1,6 +1,7 @@
 
 #!/usr/bin/env python3
 import json, os, runpy, sys
+import qs_utils
 from pathlib import Path
 
 '''
@@ -19,6 +20,7 @@ except Exception:
 
 ROOT = Path(__file__).parent.resolve()
 SCANNER = ROOT / "qs_scanner.py"
+OUTPUT_DIR = ROOT / qs_utils.get_current_timestamp()
 
 def load_targets(path: Path):
     if not path.exists():
@@ -44,6 +46,9 @@ def env_bool(name: str, default: bool):
 def main():
     load_dotenv(dotenv_path=ROOT / ".env")
 
+    # create output directory
+    Path(OUTPUT_DIR).mkdir(parents=True, exist_ok=True)
+
     enable_quic      = env_bool("ENABLE_QUIC_PROBE",      False)
     enable_nmap_tls  = env_bool("ENABLE_NMAP_TLS_ENUM",   True)
     enable_sslyze    = env_bool("ENABLE_SSLYZE_ENUM",     True)
@@ -60,6 +65,7 @@ def main():
         "ENABLE_PQC_HYBRID_SCAN": enable_pqc_hyb,
         "TARGETS": targets,
         "SSH_AUTH": ssh_auth,
+        "OUTPUT_DIR": OUTPUT_DIR
     }
 
     runpy.run_path(str(SCANNER), init_globals=globs)

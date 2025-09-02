@@ -16,8 +16,8 @@ RUN python -m pip install --upgrade pip && \
       ssh-audit 
 
 # not for production
-#RUN pip install debugpy
-#EXPOSE 5678
+RUN pip install debugpy
+EXPOSE 5678
 
 # App workspace
 WORKDIR /app

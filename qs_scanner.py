@@ -961,8 +961,19 @@ for t in TARGETS:
     # SSHD audit
     if ENABLE_SSH_AUDIT_SCAN:
         ssh_audit_json_results = qs_ssh_audit_tool.audit_ssh_host(t["host"])
+        output_dir = globals().get("OUTPUT_DIR")
+        if output_dir:
+            if not os.path.exists(output_dir):
+                os.makedirs(output_dir, exist_ok=True)
+            print(f"ensuring {output_dir} exists")
+        else:
+            print("no OUTPUT_DIR set; using current directory")
+            output_dir = "."
+
+        output_file = f"{output_dir}/{t['host']}.json"
+        print(f"using {output_file} for ssh-audit results")
         if ssh_audit_json_results:
-            with open(f'ssh_audit_{t["host"]}.json', 'w') as f:
+            with open(output_file, 'w') as f:
                 json.dump(ssh_audit_json_results, f, indent=2)
 
     # RDP (optional)
@@ -1187,8 +1198,15 @@ cbom = {
     "policy_refs": ["CNSA 2.0", "FIPS 203-205"],
 }
 
+output_dir = globals().get("OUTPUT_DIR")
+if output_dir:
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir, exist_ok=True)
+else:
+    output_dir = "."
+
 # Save outputs
-with open("cbom.json", "w") as f:
+with open(f"{output_dir}/cbom.json", "w") as f:
     json.dump(cbom, f, indent=2)
 
 rows = []
@@ -1208,6 +1226,6 @@ for c in components:
         "error": err,
     })
 df = pd.DataFrame(rows)
-df.to_csv("cbom.csv", index=False)
+df.to_csv(f"{output_dir}/cbom.csv", index=False)
 print("Wrote cbom.json and cbom.csv")
 df
