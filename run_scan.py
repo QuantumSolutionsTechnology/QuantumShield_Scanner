@@ -3,6 +3,14 @@
 import json, os, runpy, sys
 from pathlib import Path
 
+'''
+# remove comment to enable debugpy, set breakpoints in VSCode
+import debugpy
+# Allow remote debugging and wait for a client to connect
+debugpy.listen(("0.0.0.0", 5678)) # Listen on all interfaces
+debugpy.wait_for_client()
+'''
+
 from dotenv import load_dotenv
 try:
     import yaml
