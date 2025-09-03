@@ -317,23 +317,30 @@ def quic_probe_udp(host, port=443):
     except Exception as e:
         out["status"] = "error"
         out["error"] = str(e)
+    derive_quantum_risk(out)
     return out
 
 # ----------------------------
 # TLS enumeration
 # ----------------------------
-def nmap_ssl_enum(host, port=443, timeout=60):
+def nmap_ssl_enum(tls_analysis_json, timeout=60):
     """
     Uses nmap's ssl-enum-ciphers to enumerate TLS versions and ciphers.
     Returns dict: {"enumeration": { "TLSv1.2": [{cipher,...}], "TLSv1.3": [...] } }
     """
+    host = tls_analysis_json.get("host")
+    port = tls_analysis_json.get("port")  
+
     cmd = f"nmap -p {port} --script ssl-enum-ciphers -Pn --host-timeout {timeout}s {host}"
     res = sh(cmd, check=False)
-    out = {"protocol": "TLS", "tool": "nmap ssl-enum-ciphers", "host": host, "port": port, "status": "error", "raw": res.stdout}
-    if res.returncode != 0 or "ssl-enum-ciphers" not in (res.stdout or ""):
-        return out
+    tls_analysis_json["tool"] = "nmap ssl-enum-ciphers"
+    tls_analysis_json["status"] = "error"
+    tls_analysis_json["raw"] = res.stdout
 
-    out["status"] = "ok"
+    if res.returncode != 0 or "ssl-enum-ciphers" not in (res.stdout or ""):
+        return
+
+    tls_analysis_json["status"] = "ok"
     tls = {}
     current_ver = None
     for line in (res.stdout or "").splitlines():
@@ -350,13 +357,15 @@ def nmap_ssl_enum(host, port=443, timeout=60):
         elif current_ver and "signature" in L.lower():
             if tls[current_ver]:
                 tls[current_ver][-1]["sig"] = L.split(":", 1)[1].strip()
-    out["enumeration"] = tls
-    return out
+    tls_analysis_json["enumeration"] = tls
 
-def sslyze_enum(host, port=443, timeout=120):
+def sslyze_enum(tls_analysis_json, timeout=120):
     """
     Run sslyze for rich JSON: versions, ciphersuites, TLS1.3 signature schemes, certificate signature alg, etc.
     """
+    host = tls_analysis_json.get("host")
+    port = tls_analysis_json.get("port")
+
     cmd = [
         sys.executable, "-m", "sslyze",
         f"{host}:{port}",
@@ -364,14 +373,19 @@ def sslyze_enum(host, port=443, timeout=120):
         "--tls13",
         "--json_out=-"
     ]
+
+    tls_analysis_json["tool"] = "sslyze"
     try:
         res = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
         if res.returncode != 0:
-            return {"protocol":"TLS","tool":"sslyze","host":host,"port":port,"status":"error","error":(res.stderr or res.stdout)[:4000]}
+            tls_analysis_json["status"] = "error"
+            tls_analysis_json["error"] = (res.stderr or res.stdout)[:4000]
         data = json.loads(res.stdout)
-        return {"protocol":"TLS","tool":"sslyze","host":host,"port":port,"status":"ok","results": data}
+        tls_analysis_json["status"] = "OK"
+        tls_analysis_json["results"] = data
     except Exception as e:
-        return {"protocol":"TLS","tool":"sslyze","host":host,"port":port,"status":"error","error":str(e)}
+        tls_analysis_json["status"] = "error"
+        tls_analysis_json["error"] = str(e)
 
 def openssl_list_groups():
     """List TLS groups with oqsprovider loaded (for PQC hybrids)."""
@@ -400,15 +414,21 @@ def openssl_tls13_probe(host, port=443, groups=None, ciphersuites=None, sigalgs=
         if mg: out["group"]=mg.group(1)
     return out
 
-def pqc_hybrid_scan(host, port=443):
+def pqc_hybrid_scan(tls_analysis_json):
     """
     Enumerate PQC-capable hybrid groups via openssl list -groups (oqsprovider) and
     try to negotiate them. Returns any successful hybrid handshakes.
     """
+    host = tls_analysis_json.get("host")
+    port = tls_analysis_json.get("port")
+    tls_analysis_json["tool"] = "openssl+oqsprovider"
+
     groups_raw = openssl_list_groups()
     if groups_raw.get("status") != "ok":
-        return {"protocol":"TLS","tool":"openssl+oqsprovider","host":host,"port":port,"status":"error","error":"oqsprovider not loaded or OpenSSL not PQC-enabled"}
-
+        tls_analysis_json["status"] = "error"
+        tls_analysis_json["error"] = "oqsprovider not loaded or OpenSSL not PQC-enabled"
+        return 
+    
     hybrids = []
     for line in (groups_raw["raw"] or "").splitlines():
         line=line.strip()
@@ -418,16 +438,22 @@ def pqc_hybrid_scan(host, port=443):
                     hybrids.append(tok)
     hybrids = sorted(set([h for h in hybrids if len(h) > 3]))
 
-    results = {"protocol":"TLS","tool":"openssl+oqsprovider","host":host,"port":port,"status":"ok","pqc_groups_tried":hybrids,"pqc_handshakes":[]}
+    tls_analysis_json["status"] = "ok"
+    tls_analysis_json["pqc_groups_tried"] = hybrids
+    tls_analysis_json["pqc_handshakes"] = []
+
     for g in hybrids:
         try:
             pr = openssl_tls13_probe(host, port, groups=[g])
         except Exception as e:
             pr = {"status":"error","error":str(e)}
         if pr.get("status") == "ok" and pr.get("group","" ).lower().find(g.lower()) != -1:
-            results["pqc_handshakes"].append({"group": g, "cipher": pr.get("cipher")})
+            tls_analysis_json["pqc_handshakes"].append({"group": g, "cipher": pr.get("cipher")})
         time.sleep(0.2)  # gentle pacing
-    return results
+
+    # Don't fail scan if oqsprovider missing; just record status
+    if tls_analysis_json.get("status") == "ok" and tls_analysis_json.get("pqc_handshakes"):
+        tls_analysis_json["risk_flags"] = ["pqc_hybrid_detected"]
 
 def sftp_walk(sftp, root, max_depth=3, max_items=2000):
     todo = [(root.rstrip("/"), 0)]
@@ -749,13 +775,15 @@ def fs_deep_scan_v2(ssh, paths, max_depth=4, max_items=4000):
       - ELF/binary crypto strings & linked libs
     """
     sftp = ssh.open_sftp()
-    results = []
+    # TODO: hostname as param
+    results = { "protocol":"FS", "host": SSH_AUTH["hostname"] }
+    
     count = 0
     for base in paths:
         try:
             sftp.listdir(base)
         except Exception as e:
-            results.append({"protocol":"FS","status":"error","path":base,"error":str(e)})
+            results.append({"status":"error","path":base,"error":str(e)})
             continue
 
         for p, is_dir in sftp_walk(sftp, base, max_depth=max_depth, max_items=max_items):
@@ -800,10 +828,11 @@ def fs_deep_scan_v2(ssh, paths, max_depth=4, max_items=4000):
         sftp.close()
     except Exception:
         pass
+
     return results
 
 # ---- Derive quantum-relevant signals from FS + network evidence
-def derive_quantum_risk(evidence):
+def derive_quantum_risk(service_json_object):
     """
     Adds high-level quantum/HNDL/migration signals by inspecting CBOM evidence so far.
     """
@@ -814,40 +843,55 @@ def derive_quantum_risk(evidence):
         "pqc_blockers": set(),
     }
     # network components
-    for e in evidence:
-        if e.get("protocol") in {"TLS","SSH","IKE","RDP"}:
-            # HNDL exposure: classical public-key use means recordable today, decryptable later
-            if e.get("protocol") == "TLS" and e.get("tool") is None and e.get("status") == "ok":
-                # Any RSA/ECDSA auth or classical key exchange implies HNDL risk
-                pka = (e.get("public_key_alg") or "").upper()
-                if "RSA" in pka or "EC(" in pka:
-                    summary["hndl_exposed_streams"].append({"proto":"TLS","port":e.get("port"),"host":e.get("host"),"auth":pka,"cipher":e.get("cipher_name")})
-                    summary["quantum_vulnerable_algs"].update(["RSA","ECDSA"])
-            if e.get("protocol") == "SSH" and e.get("status") == "ok":
-                # classical KEX in offers
-                kex = " ".join(e.get("kex_algorithms") or [])
-                if "sntrup" in kex.lower():
-                    summary["pqc_ready_hints"].add("SSH_hybrid_kex_supported")
-                else:
-                    summary["hndl_exposed_streams"].append({"proto":"SSH","port":e.get("port"),"host":e.get("host")})
-                    summary["quantum_vulnerable_algs"].update(["ECDH","DH","RSA"])
-            if e.get("protocol") == "IKE" and e.get("status") in {"ok","no-handshake"}:
-                # IKEv2 classical DH/ECDH --> HNDL risk for VPN
-                summary["hndl_exposed_streams"].append({"proto":"IKEv2","port":e.get("port",500),"host":e.get("host")})
-                summary["quantum_vulnerable_algs"].update(["DH","ECDH","RSA"])
-        # FS components for PQC readiness/blockers
-        if e.get("protocol") == "FS":
-            det = json.dumps(e, default=str).lower()
-            if e.get("type") == "CONFIG" and "oqs" in det:
-                summary["pqc_ready_hints"].add("openssl_oqsprovider_configured")
-            if "boringssl" in det or "libressl" in det:
-                summary["pqc_blockers"].add("non_openssl_stack")
+    #for e in evidence:
+
+    if service_json_object.get("protocol") in {"TLS","SSH","IKE","RDP"}:
+        # HNDL exposure: classical public-key use means recordable today, decryptable later
+        if service_json_object.get("protocol") == "TLS" and service_json_object.get("tool") is None and service_json_object.get("status") == "ok":
+            # Any RSA/ECDSA auth or classical key exchange implies HNDL risk
+            pka = (service_json_object.get("public_key_alg") or "").upper()
+            if "RSA" in pka or "EC(" in pka:
+                summary["hndl_exposed_streams"].append(
+                    {
+                        "proto":"TLS",
+                        "host":service_json_object.get("host"),
+                        "port":service_json_object.get("port"),
+                        "auth":pka,
+                        "cipher":service_json_object.get("cipher_name")
+                    })
+                summary["quantum_vulnerable_algs"].update(["RSA","ECDSA"])
+        if service_json_object.get("protocol") == "SSH" and service_json_object.get("status") == "ok":
+            # classical KEX in offers
+            kex = " ".join(service_json_object.get("kex_algorithms") or [])
+            if "sntrup" in kex.lower():
+                summary["pqc_ready_hints"].add("SSH_hybrid_kex_supported")
+            else:
+                summary["hndl_exposed_streams"].append(
+                    {
+                        "proto":"SSH","port":service_json_object.get("port"),"host":service_json_object.get("host")
+                    })
+                summary["quantum_vulnerable_algs"].update(["ECDH","DH","RSA"])
+        if service_json_object.get("protocol") == "IKE" and service_json_object.get("status") in {"ok","no-handshake"}:
+            # IKEv2 classical DH/ECDH --> HNDL risk for VPN
+            summary["hndl_exposed_streams"].append(
+                {
+                    "proto":"IKEv2","port":service_json_object.get("port",500),"host":service_json_object.get("host")
+                })
+            summary["quantum_vulnerable_algs"].update(["DH","ECDH","RSA"])
+    # FS components for PQC readiness/blockers
+    if service_json_object.get("protocol") == "FS":
+        det = json.dumps(service_json_object, default=str).lower()
+        if service_json_object.get("type") == "CONFIG" and "oqs" in det:
+            summary["pqc_ready_hints"].add("openssl_oqsprovider_configured")
+        if "boringssl" in det or "libressl" in det:
+            summary["pqc_blockers"].add("non_openssl_stack")
     # de-dup
     summary["hndl_exposed_streams"] = list({(d["proto"],d.get("host"),d.get("port"),d.get("auth","")): d for d in summary["hndl_exposed_streams"]}.values())
     summary["quantum_vulnerable_algs"] = sorted(summary["quantum_vulnerable_algs"])
     summary["pqc_ready_hints"] = sorted(summary["pqc_ready_hints"])
     summary["pqc_blockers"] = sorted(summary["pqc_blockers"])
-    return summary
+
+    service_json_object["summary"] = summary
 
 # ----------------------------
 # Risk helpers / normalization
@@ -916,83 +960,87 @@ def assess_ike(find):
 # ----------------------------
 evidence = []
 
+# ----------------------------
+# group all of the TLS probes together for code clarity
+# ----------------------------
+def tls_analysis(host, tls_port=443, timeout=10):
+    # TLS (simple live handshake)
+    tls_analysis_json = {}
+
+    # check if port is open and create a basis json object
+    if is_port_open(host, tls_port):
+        tls_analysis_json = tls_probe(host, tls_port)
+        tls_analysis_json["risk_flags"] = assess_tls(tls_analysis_json)
+    else:
+        tls_analysis_json = {"protocol": "TLS", "host": host, "port": tls_port, "status": "closed"}
+
+    # TLS capability enumeration via nmap
+    if ENABLE_NMAP_TLS_ENUM and is_port_open(host, tls_port):
+        nmap_ssl_enum(tls_analysis_json)
+
+    # TLS capability enumeration via sslyze (richer JSON)
+    if ENABLE_SSLYZE_ENUM and is_port_open(host, tls_port):
+        sslyze_enum(tls_analysis_json)
+
+    # Optional PQC hybrid probe (scanner must have oqsprovider)
+    if ENABLE_PQC_HYBRID_SCAN and is_port_open(host, tls_port):
+        pqc_hybrid_scan(tls_analysis_json)
+
+    # provide quantum risk summary
+    derive_quantum_risk(tls_analysis_json)
+
+    # dump individual TLS JSON object to file
+    qs_utils.dump_json_to_file(tls_analysis_json, globals().get("OUTPUT_DIR"), 'tls', host)
+
+# ----------------------------
+# Main scan loop
+# ----------------------------
 for t in TARGETS:
     host = t["host"]
     tls_port = t["ports"].get("tls", 443)
     ssh_port = t["ports"].get("ssh", 22)
     print(f"\n=== Scanning {host} ({t.get('name','')}) ===")
 
-    # TLS (simple live handshake)
-    if is_port_open(host, tls_port):
-        tls = tls_probe(host, tls_port)
-        tls["risk_flags"] = assess_tls(tls)
-        evidence.append(tls)
-    else:
-        evidence.append({"protocol": "TLS", "host": host, "port": tls_port, "status": "closed"})
-
-    # TLS capability enumeration via nmap
-    if ENABLE_NMAP_TLS_ENUM and is_port_open(host, tls_port):
-        tls_enum = nmap_ssl_enum(host, tls_port)
-        if tls_enum.get("status") == "ok":
-            evidence.append(tls_enum)
-
-    # TLS capability enumeration via sslyze (richer JSON)
-    if ENABLE_SSLYZE_ENUM and is_port_open(host, tls_port):
-        tls_sslyze = sslyze_enum(host, tls_port)
-        if tls_sslyze.get("status") == "ok":
-            evidence.append(tls_sslyze)
-
-    # Optional PQC hybrid probe (scanner must have oqsprovider)
-    if ENABLE_PQC_HYBRID_SCAN and is_port_open(host, tls_port):
-        pqc = pqc_hybrid_scan(host, tls_port)
-        # Don't fail scan if oqsprovider missing; just record status
-        if pqc.get("status") == "ok" and pqc.get("pqc_handshakes"):
-            pqc["risk_flags"] = ["pqc_hybrid_detected"]
-        evidence.append(pqc)
+    # TLS anaysis
+    tls_analysis(host, tls_port)
 
     # SSH
+    # TODO: is this even needed since ssh audit scan goes deeper?
+    ssh_json_object = {}
     if is_port_open(host, ssh_port):
-        sshr = nmap_ssh_algos(host, ssh_port)
-        sshr["risk_flags"] = assess_ssh(sshr)
-        evidence.append(sshr)
+        ssh_json_object = nmap_ssh_algos(host, ssh_port)
+        ssh_json_object["risk_flags"] = assess_ssh(ssh_json_object)
     else:
-        evidence.append({"protocol": "SSH", "host": host, "port": ssh_port, "status": "closed"})
+        ssh_json_object = {"protocol": "SSH", "host": host, "port": ssh_port, "status": "closed"}
+    derive_quantum_risk(ssh_json_object)
+    qs_utils.dump_json_to_file(ssh_json_object, globals().get("OUTPUT_DIR"), 'ssh', host)
 
     # SSHD audit
     if ENABLE_SSH_AUDIT_SCAN:
         ssh_audit_json_results = qs_ssh_audit_tool.audit_ssh_host(t["host"])
-        output_dir = globals().get("OUTPUT_DIR")
-        if output_dir:
-            if not os.path.exists(output_dir):
-                os.makedirs(output_dir, exist_ok=True)
-            print(f"ensuring {output_dir} exists")
-        else:
-            print("no OUTPUT_DIR set; using current directory")
-            output_dir = "."
-
-        output_file = f"{output_dir}/{t['host']}.json"
-        print(f"using {output_file} for ssh-audit results")
-        if ssh_audit_json_results:
-            with open(output_file, 'w') as f:
-                json.dump(ssh_audit_json_results, f, indent=2)
+        qs_utils.dump_json_to_file(ssh_audit_json_results, globals().get("OUTPUT_DIR"), 'ssh_audit', host)
 
     # RDP (optional)
+    rdp_json_object = {}
     if t["ports"].get("rdp") and is_port_open(host, t["ports"]["rdp"]):
-        rdp = rdpscan(host, t["ports"]["rdp"])
-        rdp["risk_flags"] = assess_rdp(rdp)
-        evidence.append(rdp)
+        rdp_json_object = rdpscan(host, t["ports"]["rdp"])
+        rdp_json_object["risk_flags"] = assess_rdp(rdp_json_object)
+        derive_quantum_risk(rdp_json_object)
+        qs_utils.dump_json_to_file(rdp_json_object, globals().get("OUTPUT_DIR"), 'rdp', host)
 
     # IKE/IPsec (best-effort; may be silent)
-    ike = ike_scan(host)
-    if ike.get("status") == "ok":
-        ike["risk_flags"] = assess_ike(ike)
-    evidence.append(ike)
+    ike_json_object = {}
+    ike_json_object = ike_scan(host)
+    if ike_json_object.get("status") == "ok":
+        ike_json_object["risk_flags"] = assess_ike(ike_json_object)
+        derive_quantum_risk(ike_json_object)
+        qs_utils.dump_json_to_file(ike_json_object, globals().get("OUTPUT_DIR"), 'ike', host)
 
     # QUIC (optional)
-    quic = quic_probe_udp(host, 443)
-    evidence.append(quic)
+    qs_utils.dump_json_to_file(quic_probe_udp(host, 443), globals().get("OUTPUT_DIR"), 'quic', host)
 
     # ---------------- Optional: FS/Binary scan (enhanced, SFTP-only) ----------------
+
 def ssh_connect(cfg):
     import paramiko, os
     if os.environ.get("QS_SSH_DEBUG") == "true":
@@ -1147,6 +1195,7 @@ def to_component(find):
 
 
 # === FS / Binary scan (SFTP-only) ===
+sftp_json_object = {}
 try:
     if SSH_AUTH.get("enabled"):
         print("[fs] FS scan enabled; attempting SFTP to", SSH_AUTH.get("hostname"))
@@ -1155,17 +1204,15 @@ try:
             fs_depth = int(os.getenv("QS_FS_MAX_DEPTH", "4"))
             fs_items = int(os.getenv("QS_FS_MAX_ITEMS", "4000"))
             paths = SSH_AUTH.get("paths_to_scan") or [os.getenv("QS_SCAN_PATH", "/opt")]
-            fs_results = fs_deep_scan_v2(ssh, paths, max_depth=fs_depth, max_items=fs_items)
-            for r in fs_results:
-                evidence.append(r)
+            sftp_json_object = fs_deep_scan_v2(ssh, paths, max_depth=fs_depth, max_items=fs_items)
         except Exception as e:
-            evidence.append({
+            sftp_json_object = {
                 "protocol": "FS",
                 "host": SSH_AUTH.get("hostname"),
                 "status": "error",
                 "type": "SYSTEM",
                 "error": str(e),
-            })
+            }
         finally:
             try:
                 ssh.close()
@@ -1175,10 +1222,15 @@ try:
         print("[fs] FS scan disabled via config")
 except NameError:
     # If functions not defined for some reason, skip gracefully
-    evidence.append({"protocol":"FS","status":"error","type":"SYSTEM","error":"FS scanning functions unavailable"})
+    sftp_json_object = {"protocol":"FS", "host":SSH_AUTH.get("hostname"), "status":"error", "type":"SYSTEM", "error":"FS scanning functions unavailable"}
 
-quantum_summary = derive_quantum_risk(evidence)
-evidence.append({
+derive_quantum_risk(sftp_json_object)
+
+qs_utils.dump_json_to_file(sftp_json_object, globals().get("OUTPUT_DIR"), 'FS', SSH_AUTH.get("hostname"))
+
+# TODO: What is this??? PETER ASK ANDREW
+'''
+sftp_json_object.append({
     "protocol":"META",
     "host": None,
     "port": None,
@@ -1187,6 +1239,7 @@ evidence.append({
     "summary": quantum_summary,
     "risk_flags":[]
 })
+'''
 
 components = [to_component(f) for f in evidence]
 
