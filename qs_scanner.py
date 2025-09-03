@@ -1229,6 +1229,7 @@ derive_quantum_risk(sftp_json_object)
 qs_utils.dump_json_to_file(sftp_json_object, globals().get("OUTPUT_DIR"), 'FS', SSH_AUTH.get("hostname"))
 
 # TODO: What is this??? PETER ASK ANDREW
+# check
 '''
 sftp_json_object.append({
     "protocol":"META",
