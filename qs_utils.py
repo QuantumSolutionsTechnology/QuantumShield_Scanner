@@ -9,7 +9,12 @@ def get_current_timestamp():
 
 # dump json data to a file
 def dump_json_to_file(json_object, output_dir, tag, host):
-        
+    
+    if json_object:
+        json_object["schema"] = "qs-cbom:v0.3"
+        json_object["generated_at"] = datetime.now().strftime("%Y-%m-%dT%H:%M:%S%z")
+        json_object["policy_refs"] = "[\"CNSA 2.0\", \"FIPS 203-205\"]"
+
     if output_dir:
         print(f"ensuring {output_dir} exists")
         if not os.path.exists(output_dir):

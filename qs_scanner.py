@@ -956,152 +956,12 @@ def assess_ike(find):
     return flags
 
 # ----------------------------
-# Orchestration
-# ----------------------------
-evidence = []
-
-# ----------------------------
-# group all of the TLS probes together for code clarity
-# ----------------------------
-def tls_analysis(host, tls_port=443, timeout=10):
-    # TLS (simple live handshake)
-    tls_analysis_json = {}
-
-    # check if port is open and create a basis json object
-    if is_port_open(host, tls_port):
-        tls_analysis_json = tls_probe(host, tls_port)
-        tls_analysis_json["risk_flags"] = assess_tls(tls_analysis_json)
-    else:
-        tls_analysis_json = {"protocol": "TLS", "host": host, "port": tls_port, "status": "closed"}
-
-    # TLS capability enumeration via nmap
-    if ENABLE_NMAP_TLS_ENUM and is_port_open(host, tls_port):
-        nmap_ssl_enum(tls_analysis_json)
-
-    # TLS capability enumeration via sslyze (richer JSON)
-    if ENABLE_SSLYZE_ENUM and is_port_open(host, tls_port):
-        sslyze_enum(tls_analysis_json)
-
-    # Optional PQC hybrid probe (scanner must have oqsprovider)
-    if ENABLE_PQC_HYBRID_SCAN and is_port_open(host, tls_port):
-        pqc_hybrid_scan(tls_analysis_json)
-
-    # provide quantum risk summary
-    derive_quantum_risk(tls_analysis_json)
-
-    # dump individual TLS JSON object to file
-    qs_utils.dump_json_to_file(tls_analysis_json, globals().get("OUTPUT_DIR"), 'tls', host)
-
-# ----------------------------
-# Main scan loop
-# ----------------------------
-for t in TARGETS:
-    host = t["host"]
-    tls_port = t["ports"].get("tls", 443)
-    ssh_port = t["ports"].get("ssh", 22)
-    print(f"\n=== Scanning {host} ({t.get('name','')}) ===")
-
-    # TLS anaysis
-    tls_analysis(host, tls_port)
-
-    # SSH
-    # TODO: is this even needed since ssh audit scan goes deeper?
-    ssh_json_object = {}
-    if is_port_open(host, ssh_port):
-        ssh_json_object = nmap_ssh_algos(host, ssh_port)
-        ssh_json_object["risk_flags"] = assess_ssh(ssh_json_object)
-    else:
-        ssh_json_object = {"protocol": "SSH", "host": host, "port": ssh_port, "status": "closed"}
-    derive_quantum_risk(ssh_json_object)
-    qs_utils.dump_json_to_file(ssh_json_object, globals().get("OUTPUT_DIR"), 'ssh', host)
-
-    # SSHD audit
-    if ENABLE_SSH_AUDIT_SCAN:
-        ssh_audit_json_results = qs_ssh_audit_tool.audit_ssh_host(t["host"])
-        qs_utils.dump_json_to_file(ssh_audit_json_results, globals().get("OUTPUT_DIR"), 'ssh_audit', host)
-
-    # RDP (optional)
-    rdp_json_object = {}
-    if t["ports"].get("rdp") and is_port_open(host, t["ports"]["rdp"]):
-        rdp_json_object = rdpscan(host, t["ports"]["rdp"])
-        rdp_json_object["risk_flags"] = assess_rdp(rdp_json_object)
-        derive_quantum_risk(rdp_json_object)
-        qs_utils.dump_json_to_file(rdp_json_object, globals().get("OUTPUT_DIR"), 'rdp', host)
-
-    # IKE/IPsec (best-effort; may be silent)
-    ike_json_object = {}
-    ike_json_object = ike_scan(host)
-    if ike_json_object.get("status") == "ok":
-        ike_json_object["risk_flags"] = assess_ike(ike_json_object)
-        derive_quantum_risk(ike_json_object)
-        qs_utils.dump_json_to_file(ike_json_object, globals().get("OUTPUT_DIR"), 'ike', host)
-
-    # QUIC (optional)
-    qs_utils.dump_json_to_file(quic_probe_udp(host, 443), globals().get("OUTPUT_DIR"), 'quic', host)
-
-    # ---------------- Optional: FS/Binary scan (enhanced, SFTP-only) ----------------
-
-def ssh_connect(cfg):
-    import paramiko, os
-    if os.environ.get("QS_SSH_DEBUG") == "true":
-        paramiko.util.log_to_file("paramiko-debug.log")
-    client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-
-    # Try explicit in-memory key first (cfg["pkey"]), then key file, then password.
-    pkey_obj = None
-    passphrase = cfg.get("password")  # reused as key passphrase if needed
-
-    # 1) In-memory private key blob (PEM) if provided
-    if cfg.get("pkey"):
-        for KeyCls in (paramiko.Ed25519Key, paramiko.ECDSAKey, paramiko.RSAKey):
-            try:
-                pkey_obj = KeyCls.from_private_key(io.StringIO(cfg["pkey"]), password=passphrase)
-                break
-            except Exception:
-                continue
-
-    # 2) Key from file path
-    if not pkey_obj and cfg.get("key_filename") and os.path.exists(cfg["key_filename"]):
-        for KeyCls in (paramiko.Ed25519Key, paramiko.ECDSAKey, paramiko.RSAKey):
-            try:
-                pkey_obj = KeyCls.from_private_key_file(cfg["key_filename"], password=passphrase)
-                break
-            except Exception:
-                continue
-
-    try:
-        client.connect(
-            cfg["hostname"],
-            port=cfg.get("port", 22),
-            username=cfg["username"],
-            password=(None if pkey_obj else cfg.get("password")),  # only send password if no key
-            pkey=pkey_obj,
-            key_filename=cfg.get("key_filename"),
-            allow_agent=False,
-            look_for_keys=False,
-            timeout=10,
-            banner_timeout=10,
-            auth_timeout=10,
-        )
-        # Sanity-check SFTP availability early
-        sftp = client.open_sftp()
-        sftp.listdir(".")
-        sftp.close()
-        return client
-    except Exception as e:
-        # Surface the exact reason in stdout and in the CBOM evidence (later)
-        print(f"[SSH] connect/open_sftp failed: {e}")
-        raise
-
-
-# ----------------------------
 # Build CBOM
 # ----------------------------
 def to_component(find):
     """Map raw finding to a CBOM-ish component record."""
     comp = {
-        "timestamp": datetime.utcnow().replace(tzinfo=timezone.utc).isoformat(),
+        "timestamp": datetime.now().strftime("%Y-%m-%dT%H:%M:%S%z"),
         "host": find.get("host"),
         "protocol": find.get("protocol"),
         "port": find.get("port"),
@@ -1193,6 +1053,157 @@ def to_component(find):
         comp["details"] = {k: v for k, v in find.items() if k not in comp.keys()}
     return comp
 
+# ----------------------------
+# Orchestration
+# ----------------------------
+
+# ----------------------------
+# group all of the TLS probes together for code clarity
+# ----------------------------
+def tls_analysis(host, components, tls_port=443, timeout=10):
+    # TLS (simple live handshake)
+    tls_analysis_json = {}
+
+    # check if port is open and create a basis json object
+    if is_port_open(host, tls_port):
+        tls_analysis_json = tls_probe(host, tls_port)
+        tls_analysis_json["risk_flags"] = assess_tls(tls_analysis_json)
+    else:
+        tls_analysis_json = {"protocol": "TLS", "host": host, "port": tls_port, "status": "closed"}
+
+    # TLS capability enumeration via nmap
+    if ENABLE_NMAP_TLS_ENUM and is_port_open(host, tls_port):
+        nmap_ssl_enum(tls_analysis_json)
+
+    # TLS capability enumeration via sslyze (richer JSON)
+    if ENABLE_SSLYZE_ENUM and is_port_open(host, tls_port):
+        sslyze_enum(tls_analysis_json)
+
+    # Optional PQC hybrid probe (scanner must have oqsprovider)
+    if ENABLE_PQC_HYBRID_SCAN and is_port_open(host, tls_port):
+        pqc_hybrid_scan(tls_analysis_json)
+
+    # provide quantum risk summary
+    derive_quantum_risk(tls_analysis_json)
+
+    # dump individual TLS JSON object to file
+    qs_utils.dump_json_to_file(tls_analysis_json, globals().get("OUTPUT_DIR"), 'tls', host)
+
+    # add to CBOM component list
+    components.append(to_component(tls_analysis_json)) 
+
+cbom_components = [] 
+# ----------------------------
+# Main scan loop
+# ----------------------------
+for t in TARGETS:
+    host = t["host"]
+    tls_port = t["ports"].get("tls", 443)
+    ssh_port = t["ports"].get("ssh", 22)
+    print(f"\n=== Scanning {host} ({t.get('name','')}) ===")
+
+    # TLS anaysis
+    tls_analysis(host, cbom_components, tls_port)
+
+    # SSH
+    # TODO: is this even needed since ssh audit scan goes deeper?
+    ssh_json_object = {}
+    if is_port_open(host, ssh_port):
+        ssh_json_object = nmap_ssh_algos(host, ssh_port)
+        ssh_json_object["risk_flags"] = assess_ssh(ssh_json_object)
+    else:
+        ssh_json_object = {"protocol": "SSH", "host": host, "port": ssh_port, "status": "closed"}
+    # add to CBOM component list
+    cbom_components.append(to_component(ssh_json_object)) 
+    derive_quantum_risk(ssh_json_object)
+    qs_utils.dump_json_to_file(ssh_json_object, globals().get("OUTPUT_DIR"), 'ssh', host)
+
+    # SSHD audit
+    if ENABLE_SSH_AUDIT_SCAN:
+        ssh_audit_json_results = qs_ssh_audit_tool.audit_ssh_host(t["host"])
+        qs_utils.dump_json_to_file(ssh_audit_json_results, globals().get("OUTPUT_DIR"), 'ssh_audit', host)
+
+    # RDP (optional)
+    rdp_json_object = {}
+    if t["ports"].get("rdp") and is_port_open(host, t["ports"]["rdp"]):
+        rdp_json_object = rdpscan(host, t["ports"]["rdp"])
+        rdp_json_object["risk_flags"] = assess_rdp(rdp_json_object)
+        derive_quantum_risk(rdp_json_object)
+        # add to CBOM component list
+        cbom_components.append(to_component(rdp_json_object))   
+        qs_utils.dump_json_to_file(rdp_json_object, globals().get("OUTPUT_DIR"), 'rdp', host)
+
+    # IKE/IPsec (best-effort; may be silent)
+    ike_json_object = {}
+    ike_json_object = ike_scan(host)
+    if ike_json_object.get("status") == "ok":
+        ike_json_object["risk_flags"] = assess_ike(ike_json_object)
+        derive_quantum_risk(ike_json_object)
+        # add to CBOM component list
+        cbom_components.append(to_component(ike_json_object))  
+        qs_utils.dump_json_to_file(ike_json_object, globals().get("OUTPUT_DIR"), 'ike', host)
+
+    # QUIC (optional)
+    # add to CBOM component list
+    quic_json_object = quic_probe_udp(host, 443)
+    cbom_components.append(to_component(quic_json_object))  
+    qs_utils.dump_json_to_file(quic_json_object, globals().get("OUTPUT_DIR"), 'quic', host)
+
+    # ---------------- Optional: FS/Binary scan (enhanced, SFTP-only) ----------------
+
+def ssh_connect(cfg):
+    import paramiko, os
+    if os.environ.get("QS_SSH_DEBUG") == "true":
+        paramiko.util.log_to_file("paramiko-debug.log")
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
+    # Try explicit in-memory key first (cfg["pkey"]), then key file, then password.
+    pkey_obj = None
+    passphrase = cfg.get("password")  # reused as key passphrase if needed
+
+    # 1) In-memory private key blob (PEM) if provided
+    if cfg.get("pkey"):
+        for KeyCls in (paramiko.Ed25519Key, paramiko.ECDSAKey, paramiko.RSAKey):
+            try:
+                pkey_obj = KeyCls.from_private_key(io.StringIO(cfg["pkey"]), password=passphrase)
+                break
+            except Exception:
+                continue
+
+    # 2) Key from file path
+    if not pkey_obj and cfg.get("key_filename") and os.path.exists(cfg["key_filename"]):
+        for KeyCls in (paramiko.Ed25519Key, paramiko.ECDSAKey, paramiko.RSAKey):
+            try:
+                pkey_obj = KeyCls.from_private_key_file(cfg["key_filename"], password=passphrase)
+                break
+            except Exception:
+                continue
+
+    try:
+        client.connect(
+            cfg["hostname"],
+            port=cfg.get("port", 22),
+            username=cfg["username"],
+            password=(None if pkey_obj else cfg.get("password")),  # only send password if no key
+            pkey=pkey_obj,
+            key_filename=cfg.get("key_filename"),
+            allow_agent=False,
+            look_for_keys=False,
+            timeout=10,
+            banner_timeout=10,
+            auth_timeout=10,
+        )
+        # Sanity-check SFTP availability early
+        sftp = client.open_sftp()
+        sftp.listdir(".")
+        sftp.close()
+        return client
+    except Exception as e:
+        # Surface the exact reason in stdout and in the CBOM evidence (later)
+        print(f"[SSH] connect/open_sftp failed: {e}")
+        raise
+
 
 # === FS / Binary scan (SFTP-only) ===
 sftp_json_object = {}
@@ -1228,28 +1239,11 @@ derive_quantum_risk(sftp_json_object)
 
 qs_utils.dump_json_to_file(sftp_json_object, globals().get("OUTPUT_DIR"), 'FS', SSH_AUTH.get("hostname"))
 
-# TODO: What is this??? PETER ASK ANDREW
-# check
-'''
-sftp_json_object.append({
-    "protocol":"META",
-    "host": None,
-    "port": None,
-    "status":"ok",
-    "type":"QUANTUM_SUMMARY",
-    "summary": quantum_summary,
-    "risk_flags":[]
-})
-'''
-
-components = [to_component(f) for f in evidence]
+#components = [to_component(f) for f in evidence]
 
 cbom = {
-    "schema": "qs-cbom:v0.3",
-    "generated_at": datetime.utcnow().replace(tzinfo=timezone.utc).isoformat(),
     "targets": TARGETS,
-    "components": components,
-    "policy_refs": ["CNSA 2.0", "FIPS 203-205"],
+    "components": cbom_components,
 }
 
 output_dir = globals().get("OUTPUT_DIR")
@@ -1263,23 +1257,5 @@ else:
 with open(f"{output_dir}/cbom.json", "w") as f:
     json.dump(cbom, f, indent=2)
 
-rows = []
-for c in components:
-    details = c.get("details") or {}
-    err = details.get("error") if isinstance(details, dict) else None
-    rows.append({
-        "host": c["host"],
-        "protocol": c["protocol"],
-        "port": c["port"],
-        "status": c["status"],
-        "algorithm": c["algorithm"],
-        "key_bits": c["key_bits"],
-        "version": c["version"],
-        "risk_flags": ";".join(c.get("risk_flags", [])),
-        "artifact": c.get("artifact"),
-        "error": err,
-    })
-df = pd.DataFrame(rows)
-df.to_csv(f"{output_dir}/cbom.csv", index=False)
-print("Wrote cbom.json and cbom.csv")
-df
+
+print("all JSON outputs written to", output_dir)
