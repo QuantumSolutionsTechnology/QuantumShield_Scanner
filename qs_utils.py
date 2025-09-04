@@ -16,7 +16,6 @@ def dump_json_to_file(json_object, output_dir, tag, host):
         json_object["policy_refs"] = "[\"CNSA 2.0\", \"FIPS 203-205\"]"
 
     if output_dir:
-        print(f"ensuring {output_dir} exists")
         if not os.path.exists(output_dir):
             os.makedirs(output_dir, exist_ok=True)
     else:
@@ -24,7 +23,7 @@ def dump_json_to_file(json_object, output_dir, tag, host):
         output_dir = "."
 
     output_file = f"{output_dir}/{tag}_{host}.json"
-    print(f"using {output_file} json results")
+    print(f"writing to {output_file} ...")
     if json_object:
         with open(output_file, 'w') as f:
             json.dump(json_object, f, indent=2)

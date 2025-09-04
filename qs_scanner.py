@@ -1129,7 +1129,6 @@ for t in TARGETS:
     tls_analysis(host, cbom_components, tls_port)
 
     # SSH
-    # TODO: is this even needed since ssh audit scan goes deeper?
     ssh_json_object = {}
     if is_port_open(host, ssh_port):
         ssh_json_object = nmap_ssh_algos(host, ssh_port)
@@ -1258,27 +1257,16 @@ except NameError:
     # If functions not defined for some reason, skip gracefully
     sftp_json_object = {"protocol":"FS", "host":SSH_AUTH.get("hostname"), "status":"error", "type":"SYSTEM", "error":"FS scanning functions unavailable"}
 
+cbom_components.append(to_component(sftp_json_object)) 
 derive_quantum_risk(sftp_json_object)
 
 qs_utils.dump_json_to_file(sftp_json_object, globals().get("OUTPUT_DIR"), 'FS', SSH_AUTH.get("hostname"))
-
-#components = [to_component(f) for f in evidence]
 
 cbom = {
     "targets": TARGETS,
     "components": cbom_components,
 }
 
-output_dir = globals().get("OUTPUT_DIR")
-if output_dir:
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir, exist_ok=True)
-else:
-    output_dir = "."
+qs_utils.dump_json_to_file(cbom, globals().get("OUTPUT_DIR"), 'cbpm', 'scan')
 
-# Save outputs
-with open(f"{output_dir}/cbom.json", "w") as f:
-    json.dump(cbom, f, indent=2)
-
-
-print("all JSON outputs written to", output_dir)
+print("all JSON outputs written to", globals().get("OUTPUT_DIR"))
