@@ -1267,6 +1267,6 @@ cbom = {
     "components": cbom_components,
 }
 
-qs_utils.dump_json_to_file(cbom, globals().get("OUTPUT_DIR"), 'cbpm', 'scan')
+qs_utils.dump_json_to_file(cbom, globals().get("OUTPUT_DIR"), 'cbom', 'scan')
 
 print("all JSON outputs written to", globals().get("OUTPUT_DIR"))
