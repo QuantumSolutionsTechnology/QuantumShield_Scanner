@@ -1062,35 +1062,58 @@ def to_component(find):
 # ----------------------------
 def tls_analysis(host, components, tls_port=443, timeout=10):
     # TLS (simple live handshake)
-    tls_analysis_json = {}
-
+    
+    # ----- probe -----
+    tls_analysis_json = {"protocol": "TLS", "host": host, "port": tls_port}
     # check if port is open and create a basis json object
     if is_port_open(host, tls_port):
         tls_analysis_json = tls_probe(host, tls_port)
         tls_analysis_json["risk_flags"] = assess_tls(tls_analysis_json)
     else:
         tls_analysis_json = {"protocol": "TLS", "host": host, "port": tls_port, "status": "closed"}
+    # provide quantum risk summary
+    derive_quantum_risk(tls_analysis_json)
+    # add to CBOM component list
+    components.append(to_component(tls_analysis_json)) 
+    # dump individual TLS JSON object to file
+    qs_utils.dump_json_to_file(tls_analysis_json, globals().get("OUTPUT_DIR"), 'tls_probe', host)
 
+    # ----- nmap ssl-enum-ciphers -----
+    tls_analysis_json = {"protocol": "TLS", "host": host, "port": tls_port}
     # TLS capability enumeration via nmap
     if ENABLE_NMAP_TLS_ENUM and is_port_open(host, tls_port):
         nmap_ssl_enum(tls_analysis_json)
+        # add to CBOM component list
+        components.append(to_component(tls_analysis_json)) 
+        # provide quantum risk summary
+        derive_quantum_risk(tls_analysis_json)
+        # dump individual TLS JSON object to file
+        qs_utils.dump_json_to_file(tls_analysis_json, globals().get("OUTPUT_DIR"), 'tls_ssl', host)
 
+    # ----- sslyze -----
+    tls_analysis_json = {"protocol": "TLS", "host": host, "port": tls_port}
     # TLS capability enumeration via sslyze (richer JSON)
     if ENABLE_SSLYZE_ENUM and is_port_open(host, tls_port):
         sslyze_enum(tls_analysis_json)
+        # add to CBOM component list
+        components.append(to_component(tls_analysis_json)) 
+        # provide quantum risk summary
+        derive_quantum_risk(tls_analysis_json)
+        # dump individual TLS JSON object to file
+        qs_utils.dump_json_to_file(tls_analysis_json, globals().get("OUTPUT_DIR"), 'tls_sslyze', host)
 
+    # ----- PQC hybrid probe -----
+    tls_analysis_json = {"protocol": "TLS", "host": host, "port": tls_port}
     # Optional PQC hybrid probe (scanner must have oqsprovider)
     if ENABLE_PQC_HYBRID_SCAN and is_port_open(host, tls_port):
         pqc_hybrid_scan(tls_analysis_json)
+        # add to CBOM component list
+        components.append(to_component(tls_analysis_json)) 
+        # provide quantum risk summary
+        derive_quantum_risk(tls_analysis_json)
+        # dump individual TLS JSON object to file
+        qs_utils.dump_json_to_file(tls_analysis_json, globals().get("OUTPUT_DIR"), 'tls_pqc', host)
 
-    # provide quantum risk summary
-    derive_quantum_risk(tls_analysis_json)
-
-    # dump individual TLS JSON object to file
-    qs_utils.dump_json_to_file(tls_analysis_json, globals().get("OUTPUT_DIR"), 'tls', host)
-
-    # add to CBOM component list
-    components.append(to_component(tls_analysis_json)) 
 
 cbom_components = [] 
 # ----------------------------
