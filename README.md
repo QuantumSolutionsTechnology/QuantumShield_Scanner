@@ -77,7 +77,7 @@ ENABLE_QUIC_PROBE=false
 # ===== FS / SFTP scan =====
 QS_FS_ENABLED=true
 QS_SSH_ENABLED=true
-QS_SSH_HOST=20.55.32.72   # Host to SFTP into (for FS scan)
+QS_SSH_HOST=00.00.00.00   # Host to SFTP into (for FS scan)
 QS_SSH_PORT=22
 QS_SSH_USER=qsro
 QS_SSH_KEYFILE=/home/you/.ssh/qsro_pem     # path to your **private** key on the scanner machine
@@ -90,8 +90,8 @@ QS_SSH_DEBUG=true                           # verbose logs (optional)
 Minimal example (replace with your real host/IP):
 
 ```yaml
-- host: 20.55.32.72
-  name: azure-vm-01
+- host: 00.00.00.00
+  name: host-name
   ports:
     tls: 443
     ssh: 22
@@ -132,7 +132,7 @@ sudo test -r /opt/quantumshield_demo || sudo chmod -R a+rX /opt/quantumshield_de
 **Optional sanity test** from your scanner box:
 ```bash
 # list remote path via sftp
-sftp -i /path/to/qsro_pem -P 22 qsro@20.55.32.72 <<'EOF'
+sftp -i /path/to/qsro_pem -P 22 qsro@00.00.00.00 <<'EOF'
 ls -l /opt/quantumshield_demo
 bye
 EOF
@@ -184,7 +184,7 @@ sudo chown -R qsro:qsro /home/qsro/.ssh
 # Use your existing admin login/key for the VM to copy the public key up
 scp -i "C:\path\to\your\admin_login_key.pem" `
     "C:\Users\<you>\.ssh\qsro_pem.pub" `
-    azureuser@20.55.32.72:/tmp/qsro_pub.pub
+    azureuser@00.00.00.00:/tmp/qsro_pub.pub
 
 # Then on the VM:
 sudo id qsro || sudo useradd -m -s /bin/bash qsro
@@ -225,7 +225,7 @@ ENABLE_QUIC_PROBE=false
 # FS/SFTP
 QS_FS_ENABLED=true
 QS_SSH_ENABLED=true
-QS_SSH_HOST=20.55.32.72
+QS_SSH_HOST=00.00.00.00
 QS_SSH_PORT=22
 QS_SSH_USER=qsro
 
@@ -241,8 +241,8 @@ QS_SSH_DEBUG=true
 
 **`targets.yaml` example:**
 ```yaml
-- host: 20.55.32.72
-  name: azure-vm-01
+- host: 00.00.00.00
+  name: host-name
   ports:
     tls: 443
     ssh: 22
@@ -331,7 +331,7 @@ openssl s_client -connect your.domain.com:443 -servername your.domain.com -brief
 
 **SFTP reachability**
 ```bash
-sftp -i /path/to/private_key -P 22 qsro@20.55.32.72 <<'EOF'
+sftp -i /path/to/private_key -P 22 qsro@00.00.00.00 <<'EOF'
 ls -l /opt/quantumshield_demo
 bye
 EOF
@@ -356,8 +356,8 @@ EOF
   ```
 - Confirm the key really works:
   ```bash
-  ssh -i /path/to/private_key -o StrictHostKeyChecking=no qsro@20.55.32.72 "echo ok"
-  sftp -i /path/to/private_key -P 22 qsro@20.55.32.72 <<'EOF'
+  ssh -i /path/to/private_key -o StrictHostKeyChecking=no qsro@00.00.00.00 "echo ok"
+  sftp -i /path/to/private_key -P 22 qsro@00.00.00.00 <<'EOF'
   ls -l /opt/quantumshield_demo
   bye
   EOF
