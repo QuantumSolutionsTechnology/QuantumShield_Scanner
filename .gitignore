@@ -1,0 +1,20 @@
+# ignore Python virtual enviroment directories
+venv/
+.vnenv/
+
+# ignore py cache
+__pycache__
+
+# ignore os-specific files
+.DS_Store
+Thumbs.db
+
+# ignore id specific files
+.vscode/
+
+# ignore any temp files
+.tmp/
+
+# ignore run logs
+paramiko-debug.log
+
