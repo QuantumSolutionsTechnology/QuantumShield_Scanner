@@ -1,5 +1,6 @@
 from datetime import datetime
 import json, os
+import psutil, socket
 
 # Utility function to get the current timestamp in "YYYYMMDD_HHMM" format
 def get_current_timestamp():
@@ -27,3 +28,17 @@ def dump_json_to_file(json_object, output_dir, tag, host):
     if json_object:
         with open(output_file, 'w') as f:
             json.dump(json_object, f, indent=2)
+
+def get_network_interfaces():
+    interfaces = psutil.net_if_addrs()
+    return list(interfaces.keys())
+
+def get_ip_address_of_interface(interface_name):
+    # Retrieves the IPv4 address of a specified network interface.
+    addresses = psutil.net_if_addrs()
+    if interface_name in addresses:
+        for addr in addresses[interface_name]:
+            if addr.family == socket.AF_INET:  # Check for IPv4 addresses
+                print(f"discoered hosted interface {interface_name} with IP {addr.address}")
+                return addr.address
+    return None

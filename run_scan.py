@@ -68,7 +68,7 @@ def main():
         "OUTPUT_DIR": OUTPUT_DIR
     }
 
-    runpy.run_path(str(SCANNER), init_globals=globs)
+    runpy.run_path(str(SCANNER), run_name='__main__', init_globals=globs)
 
 if __name__ == "__main__":
     main()
