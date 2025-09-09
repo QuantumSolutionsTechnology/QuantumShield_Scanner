@@ -1114,65 +1114,6 @@ def tls_analysis(host, components, tls_port=443, timeout=10):
         # dump individual TLS JSON object to file
         qs_utils.dump_json_to_file(tls_analysis_json, globals().get("OUTPUT_DIR"), 'tls_pqc', host)
 
-
-cbom_components = [] 
-# ----------------------------
-# Main scan loop
-# ----------------------------
-for t in TARGETS:
-    host = t["host"]
-    tls_port = t["ports"].get("tls", 443)
-    ssh_port = t["ports"].get("ssh", 22)
-    print(f"\n=== Scanning {host} ({t.get('name','')}) ===")
-
-    # TLS anaysis
-    tls_analysis(host, cbom_components, tls_port)
-
-    # SSH
-    ssh_json_object = {}
-    if is_port_open(host, ssh_port):
-        ssh_json_object = nmap_ssh_algos(host, ssh_port)
-        ssh_json_object["risk_flags"] = assess_ssh(ssh_json_object)
-    else:
-        ssh_json_object = {"protocol": "SSH", "host": host, "port": ssh_port, "status": "closed"}
-    # add to CBOM component list
-    cbom_components.append(to_component(ssh_json_object)) 
-    derive_quantum_risk(ssh_json_object)
-    qs_utils.dump_json_to_file(ssh_json_object, globals().get("OUTPUT_DIR"), 'ssh', host)
-
-    # SSHD audit
-    if ENABLE_SSH_AUDIT_SCAN:
-        ssh_audit_json_results = qs_ssh_audit_tool.audit_ssh_host(t["host"])
-        qs_utils.dump_json_to_file(ssh_audit_json_results, globals().get("OUTPUT_DIR"), 'ssh_audit', host)
-
-    # RDP (optional)
-    rdp_json_object = {}
-    if t["ports"].get("rdp") and is_port_open(host, t["ports"]["rdp"]):
-        rdp_json_object = rdpscan(host, t["ports"]["rdp"])
-        rdp_json_object["risk_flags"] = assess_rdp(rdp_json_object)
-        derive_quantum_risk(rdp_json_object)
-        # add to CBOM component list
-        cbom_components.append(to_component(rdp_json_object))   
-        qs_utils.dump_json_to_file(rdp_json_object, globals().get("OUTPUT_DIR"), 'rdp', host)
-
-    # IKE/IPsec (best-effort; may be silent)
-    ike_json_object = {}
-    ike_json_object = ike_scan(host)
-    if ike_json_object.get("status") == "ok":
-        ike_json_object["risk_flags"] = assess_ike(ike_json_object)
-        derive_quantum_risk(ike_json_object)
-        # add to CBOM component list
-        cbom_components.append(to_component(ike_json_object))  
-        qs_utils.dump_json_to_file(ike_json_object, globals().get("OUTPUT_DIR"), 'ike', host)
-
-    # QUIC (optional)
-    # add to CBOM component list
-    quic_json_object = quic_probe_udp(host, 443)
-    cbom_components.append(to_component(quic_json_object))  
-    qs_utils.dump_json_to_file(quic_json_object, globals().get("OUTPUT_DIR"), 'quic', host)
-
-    # ---------------- Optional: FS/Binary scan (enhanced, SFTP-only) ----------------
-
 def ssh_connect(cfg):
     import paramiko, os
     if os.environ.get("QS_SSH_DEBUG") == "true":
@@ -1226,47 +1167,113 @@ def ssh_connect(cfg):
         print(f"[SSH] connect/open_sftp failed: {e}")
         raise
 
+# ----------------------------
+# Main scan logic being implemented here
+# ----------------------------
+def main():
 
-# === FS / Binary scan (SFTP-only) ===
-sftp_json_object = {}
-try:
-    if SSH_AUTH.get("enabled"):
-        print("[fs] FS scan enabled; attempting SFTP to", SSH_AUTH.get("hostname"))
-        try:
-            ssh = ssh_connect(SSH_AUTH)
-            fs_depth = int(os.getenv("QS_FS_MAX_DEPTH", "4"))
-            fs_items = int(os.getenv("QS_FS_MAX_ITEMS", "4000"))
-            paths = SSH_AUTH.get("paths_to_scan") or [os.getenv("QS_SCAN_PATH", "/opt")]
-            sftp_json_object = fs_deep_scan_v2(ssh, paths, max_depth=fs_depth, max_items=fs_items)
-        except Exception as e:
-            sftp_json_object = {
-                "protocol": "FS",
-                "host": SSH_AUTH.get("hostname"),
-                "status": "error",
-                "type": "SYSTEM",
-                "error": str(e),
-            }
-        finally:
+    cbom_components = [] 
+
+    for t in TARGETS:
+        host = t["host"]
+        tls_port = t["ports"].get("tls", 443)
+        ssh_port = t["ports"].get("ssh", 22)
+        print(f"\n=== Scanning {host} ({t.get('name','')}) ===")
+
+        # TLS anaysis
+        tls_analysis(host, cbom_components, tls_port)
+
+        # SSH
+        ssh_json_object = {}
+        if is_port_open(host, ssh_port):
+            ssh_json_object = nmap_ssh_algos(host, ssh_port)
+            ssh_json_object["risk_flags"] = assess_ssh(ssh_json_object)
+        else:
+            ssh_json_object = {"protocol": "SSH", "host": host, "port": ssh_port, "status": "closed"}
+        # add to CBOM component list
+        cbom_components.append(to_component(ssh_json_object)) 
+        derive_quantum_risk(ssh_json_object)
+        qs_utils.dump_json_to_file(ssh_json_object, globals().get("OUTPUT_DIR"), 'ssh', host)
+
+        # SSHD audit
+        if ENABLE_SSH_AUDIT_SCAN:
+            ssh_audit_json_results = qs_ssh_audit_tool.audit_ssh_host(t["host"])
+            qs_utils.dump_json_to_file(ssh_audit_json_results, globals().get("OUTPUT_DIR"), 'ssh_audit', host)
+
+        # RDP (optional)
+        rdp_json_object = {}
+        if t["ports"].get("rdp") and is_port_open(host, t["ports"]["rdp"]):
+            rdp_json_object = rdpscan(host, t["ports"]["rdp"])
+            rdp_json_object["risk_flags"] = assess_rdp(rdp_json_object)
+            derive_quantum_risk(rdp_json_object)
+            # add to CBOM component list
+            cbom_components.append(to_component(rdp_json_object))   
+            qs_utils.dump_json_to_file(rdp_json_object, globals().get("OUTPUT_DIR"), 'rdp', host)
+
+        # IKE/IPsec (best-effort; may be silent)
+        ike_json_object = {}
+        ike_json_object = ike_scan(host)
+        if ike_json_object.get("status") == "ok":
+            ike_json_object["risk_flags"] = assess_ike(ike_json_object)
+            derive_quantum_risk(ike_json_object)
+            # add to CBOM component list
+            cbom_components.append(to_component(ike_json_object))  
+            qs_utils.dump_json_to_file(ike_json_object, globals().get("OUTPUT_DIR"), 'ike', host)
+
+        # QUIC (optional)
+        # add to CBOM component list
+        quic_json_object = quic_probe_udp(host, 443)
+        cbom_components.append(to_component(quic_json_object))  
+        qs_utils.dump_json_to_file(quic_json_object, globals().get("OUTPUT_DIR"), 'quic', host)
+
+    # === FS / Binary scan (SFTP-only) ===
+    sftp_json_object = {}
+    try:
+        if SSH_AUTH.get("enabled"):
+            print("[fs] FS scan enabled; attempting SFTP to", SSH_AUTH.get("hostname"))
             try:
-                ssh.close()
-            except Exception:
-                pass
-    else:
-        print("[fs] FS scan disabled via config")
-except NameError:
-    # If functions not defined for some reason, skip gracefully
-    sftp_json_object = {"protocol":"FS", "host":SSH_AUTH.get("hostname"), "status":"error", "type":"SYSTEM", "error":"FS scanning functions unavailable"}
+                ssh = ssh_connect(SSH_AUTH)
+                fs_depth = int(os.getenv("QS_FS_MAX_DEPTH", "4"))
+                fs_items = int(os.getenv("QS_FS_MAX_ITEMS", "4000"))
+                paths = SSH_AUTH.get("paths_to_scan") or [os.getenv("QS_SCAN_PATH", "/opt")]
+                sftp_json_object = fs_deep_scan_v2(ssh, paths, max_depth=fs_depth, max_items=fs_items)
+            except Exception as e:
+                sftp_json_object = {
+                    "protocol": "FS",
+                    "host": SSH_AUTH.get("hostname"),
+                    "status": "error",
+                    "type": "SYSTEM",
+                    "error": str(e),
+                }
+            finally:
+                try:
+                    ssh.close()
+                except Exception:
+                    pass
+        else:
+            print("[fs] FS scan disabled via config")
+    except NameError:
+        # If functions not defined for some reason, skip gracefully
+        sftp_json_object = {"protocol":"FS", "host":SSH_AUTH.get("hostname"), "status":"error", "type":"SYSTEM", "error":"FS scanning functions unavailable"}
 
-cbom_components.append(to_component(sftp_json_object)) 
-derive_quantum_risk(sftp_json_object)
+    derive_quantum_risk(sftp_json_object)
+    cbom_components.append(to_component(sftp_json_object)) 
+    qs_utils.dump_json_to_file(sftp_json_object, globals().get("OUTPUT_DIR"), 'FS', SSH_AUTH.get("hostname"))
 
-qs_utils.dump_json_to_file(sftp_json_object, globals().get("OUTPUT_DIR"), 'FS', SSH_AUTH.get("hostname"))
+    cbom = {
+        "targets": TARGETS,
+        "components": cbom_components,
+    }
 
-cbom = {
-    "targets": TARGETS,
-    "components": cbom_components,
-}
+    qs_utils.dump_json_to_file(cbom, globals().get("OUTPUT_DIR"), 'cbom', 'scan')
 
-qs_utils.dump_json_to_file(cbom, globals().get("OUTPUT_DIR"), 'cbom', 'scan')
+    print("all JSON outputs written to", globals().get("OUTPUT_DIR"))
 
-print("all JSON outputs written to", globals().get("OUTPUT_DIR"))
+    interfaces = qs_utils.get_network_interfaces()
+
+    for iface in interfaces:
+        qs_utils.get_ip_address_of_interface(iface)
+
+
+if __name__ == "__main__":
+    main()
