@@ -10,11 +10,14 @@ Scans endpoints to inventory network cryptographic posture and (optionally) **fi
 
 ## Repo layout (key files)
 
-- `run_scan.py` — runner that loads config (`.env`, `targets.yaml`) and invokes the scanner
+- `run_scan.py` — runner that loads config (`.env`, `targets.yaml`) and invokes the scanner, also runs API server on port 5555
 - `qs_scanner.py` — the scanner module (TLS/SSH/RDP/IKE/FS logic)
+- `qs_utils.py` - utilities code
 - `targets.yaml` — your target hosts and ports (**you create/edit this**)
 - `.env` — feature toggles & optional Azure credentials (**you create/edit this**)
 - `Dockerfile` — optional reusable image for Docker path
+
+There are other development files, such as .gitignore and so on.  
 
 ---
 
@@ -51,7 +54,7 @@ sudo dnf install -y python3 python3-venv python3-pip nmap ike-scan openssl
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
-python -m pip install python-dotenv pyyaml cryptography paramiko pandas pynacl ecdsa sslyze pyjks pyelftools ssh-audit
+python -m pip install python-dotenv pyyaml cryptography paramiko pandas pynacl ecdsa sslyze pyjks pyelftools ssh-audit ... (see latest Docker for additional requirments)
 ```
 
 ### 3) Create `.env` (feature toggles + optional Azure + FS/SFTP)
@@ -142,13 +145,34 @@ EOF
 ```bash
 python run_scan.py
 ```
-Results: `cbom.json` and `cbom.csv` appear in the repo folder.
+Results: A timestamp folder should be created containing json files per target and aspect of security scan, also a cummulative `cbom_scan.json` is compiled.
 
 **Re-run later:** just re-run `python run_scan.py` (you can keep the same venv).
 
 ---
 
 ## B) Windows/macOS (and Linux) via **Docker**
+
+> Within Visual Studio Code
+
+In the terminal window, build the code
+``` docker build --no-cache -t qs-scan . ```
+In the terminal window, to run the code
+``` docker run -p 5555:5555 -v .:/app qs-scan ```
+
+In order to run in the debug mode, uncomment relevent code in `run_scan.py`
+
+```
+'''
+# remove comment to enable debugpy, set breakpoints in VSCode
+import debugpy
+# Allow remote debugging and wait for a client to connect
+debugpy.listen(("0.0.0.0", 5678)) # Listen on all interfaces
+debugpy.wait_for_client()
+'''
+```
+
+Rebuild and run as above.  
 
 > This path runs the scanner inside a clean Linux container. No local installs needed besides Docker.
 
@@ -387,6 +411,14 @@ Azure is optional. Leave the fields blank to skip cloud discovery; scan runs on 
 - Results include `risk_flags` (e.g., `legacy_tls`, `rsa_lt_3072`, `ssh_sha1_macs_enabled`, etc.) to help prioritize remediation.
 
 ---
+
+## Supported API
+
+Currenlty only few APIs are exposed.  
+
+``` http://127.0.0.1:5555/cbom ```
+``` http://127.0.0.1:5555/scan?type=ssh_audit&host=20.55.32.72 ```
+``` http://127.0.0.1:5555/runscan ```
 
 ## FAQ
 

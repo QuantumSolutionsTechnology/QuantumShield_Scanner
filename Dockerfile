@@ -13,12 +13,13 @@ RUN python -m pip install --upgrade pip && \
       cryptography paramiko pandas pynacl ecdsa sslyze pyjks pyelftools \
       python-dotenv pyyaml \
       azure-identity azure-mgmt-compute azure-mgmt-network \
-      ssh-audit psutil
+      ssh-audit psutil flask
 
 # not for production
 RUN pip install debugpy
-EXPOSE 5678
-
+# port 5678 for debugpy
+# port 5555 for Flask (if used)
+EXPOSE 5678 5555
 # App workspace
 WORKDIR /app
 

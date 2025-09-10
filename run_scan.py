@@ -3,6 +3,7 @@
 import json, os, runpy, sys
 import qs_utils
 from pathlib import Path
+from flask import Flask, request
 
 '''
 # remove comment to enable debugpy, set breakpoints in VSCode
@@ -17,6 +18,8 @@ try:
     import yaml
 except Exception:
     yaml = None
+
+app = Flask(__name__)
 
 ROOT = Path(__file__).parent.resolve()
 SCANNER = ROOT / "qs_scanner.py"
@@ -43,8 +46,15 @@ def env_bool(name: str, default: bool):
         return default
     return str(v).strip().lower() in ("1","true","yes","on")
 
-def main():
+# -------
+# runs the scanner tool with config from .env and targets.yaml
+# -------
+def run_scanner():
     load_dotenv(dotenv_path=ROOT / ".env")
+
+    # update output directory for output files
+    global OUTPUT_DIR 
+    OUTPUT_DIR = ROOT / qs_utils.get_current_timestamp()
 
     # create output directory
     Path(OUTPUT_DIR).mkdir(parents=True, exist_ok=True)
@@ -70,5 +80,70 @@ def main():
 
     runpy.run_path(str(SCANNER), run_name='__main__', init_globals=globs)
 
+# -------
+# main entry point
+# -------
+def main():
+    run_scanner()    
+
+# -------
+# simple Flask API to get results
+# TODO: create API module
+# -------
+
+@app.route('/')
+def hello_world():
+    return 'QS Ready!'
+
+@app.route('/runscan', methods=['GET'])
+def runscan():
+    try:
+        run_scanner()
+        return {"status": "scan completed"}, 200
+    except Exception as e:
+        return {"error": str(e)}, 500
+
+@app.route('/status', methods=['GET'])
+def status():
+    return {"status": "running"}, 200
+
+@app.route('/results', methods=['GET'])
+def results():
+    results = []
+    for file in os.listdir(OUTPUT_DIR):
+        if file.endswith(".json"):
+            with open(os.path.join(OUTPUT_DIR, file), 'r') as f:
+                data = json.load(f)
+                results.append(data)
+    return {"results": results}, 200
+
+@app.route('/cbom', methods=['GET'])
+def cbom():
+    for file in os.listdir(OUTPUT_DIR):
+        if file.endswith("cbom_scan.json"):
+            with open(os.path.join(OUTPUT_DIR, file), 'r') as f:
+                data = json.load(f)
+                return data, 200
+    return {"cbom": 'not found'}, 200
+
+@app.route('/scan', methods=['GET'])
+def scan():
+    type = request.args.get('type', None)
+    host = request.args.get('host', None)
+    if type is None or host is None:
+        return {"error": "type and host parameters are required"}, 400
+    
+    for file in os.listdir(OUTPUT_DIR):
+        if file.startswith(type) and file.endswith(f"{host}.json"):
+            with open(os.path.join(OUTPUT_DIR, file), 'r') as f:
+                data = json.load(f)
+                return data, 200
+            
+    return {"scan": 'not found'}, 200
+    # create output directory
+    Path(OUTPUT_DIR).mkdir(parents=True, exist_ok=True)
+
 if __name__ == "__main__":
     main()
+    app.run(host='0.0.0.0', port=5555)
+
